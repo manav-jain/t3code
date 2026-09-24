@@ -100,7 +100,9 @@ import {
   OrchestrationGetTurnDiffInput,
   OrchestrationRpcSchemas,
   OrchestrationGetWorkflowScriptError,
+  ThreadSlackThreadKey,
 } from "./orchestration.ts";
+import { SlackThreadReadError, SlackThreadReadResult } from "./slack.ts";
 import {
   ProviderUploadFeedbackError,
   ProviderUploadFeedbackInput,
@@ -420,6 +422,9 @@ export const WS_METHODS = {
   pullRequestsLabelCandidates: "pullRequests.labelCandidates",
   pullRequestsSetLabels: "pullRequests.setLabels",
 
+  // Slack methods
+  slackThreadRead: "slack.thread.read",
+
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
   sourceControlCloneRepository: "sourceControl.cloneRepository",
@@ -735,6 +740,12 @@ const WsPullRequestsStackRpc = Rpc.make(WS_METHODS.pullRequestsStack, {
   payload: PullRequestRef,
   success: Schema.NullOr(PullRequestStack),
   error: PullRequestRpcError,
+});
+
+const WsSlackThreadReadRpc = Rpc.make(WS_METHODS.slackThreadRead, {
+  payload: ThreadSlackThreadKey,
+  success: SlackThreadReadResult,
+  error: Schema.Union([SlackThreadReadError, EnvironmentAuthorizationError]),
 });
 
 const WsPullRequestsLinkedThreadsRpc = Rpc.make(WS_METHODS.pullRequestsLinkedThreads, {
@@ -1436,6 +1447,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsRoutingIdentityRpc,
   WsPullRequestsStackRpc,
   WsPullRequestsLinkedThreadsRpc,
+  WsSlackThreadReadRpc,
   WsPullRequestsDetailRpc,
   WsPullRequestsPreviewRpc,
   WsPullRequestsActivityRpc,

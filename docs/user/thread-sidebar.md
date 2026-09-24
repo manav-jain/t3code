@@ -118,6 +118,22 @@ On web and desktop, right-click a pull request link in a thread and choose
 same link to return to the branch PR, if one exists.
 The linked pull request participates in automatic settlement.
 
+## Link a Slack thread
+
+Keep the Slack discussion behind a thread next to it. On web and desktop, use
+**Link Slack thread to thread** in the command palette, the **Slack threads**
+panel, or right-click a Slack link in the conversation and choose **Link to
+thread**. Paste any message link from the thread; a reply's link works too.
+Agents can link and read Slack threads with the `link_slack_thread` and
+`read_slack_thread` tools.
+
+Reading messages needs a Slack user token on the environment. Create a Slack
+app, add the `channels:history`, `groups:history`, `im:history`,
+`mpim:history`, and `users:read` user scopes, install it to your workspace, and
+paste its `xoxp-` token in **Settings → Integrations → Slack**. The token stays
+on the server. Messages are read from Slack when you expand a thread and are
+not stored; the token only sees conversations its user can see.
+
 ## Find and reference work
 
 On web and desktop, open the command palette with `Cmd/Ctrl+K` to search threads

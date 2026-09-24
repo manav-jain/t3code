@@ -790,6 +790,25 @@ export const ThreadPullRequestLink = Schema.Struct({
 });
 export type ThreadPullRequestLink = typeof ThreadPullRequestLink.Type;
 
+/** A Slack thread: its channel and the parent message's timestamp (see `@t3tools/shared/slackThreadUrl`). */
+export const ThreadSlackThreadKey = Schema.Struct({
+  channelId: TrimmedNonEmptyString,
+  threadTs: TrimmedNonEmptyString,
+});
+export type ThreadSlackThreadKey = typeof ThreadSlackThreadKey.Type;
+
+export const ThreadSlackThreadLinkSource = Schema.Literals(["manual", "agent"]);
+export type ThreadSlackThreadLinkSource = typeof ThreadSlackThreadLinkSource.Type;
+
+/** A Slack thread captured into a T3 thread. Only the reference is stored; messages are read on demand. */
+export const ThreadSlackThreadLink = Schema.Struct({
+  ...ThreadSlackThreadKey.fields,
+  url: TrimmedNonEmptyString,
+  source: ThreadSlackThreadLinkSource,
+  linkedAt: IsoDateTime,
+});
+export type ThreadSlackThreadLink = typeof ThreadSlackThreadLink.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -806,6 +825,8 @@ export const OrchestrationThread = Schema.Struct({
   pullRequests: Schema.Array(ThreadPullRequestLink).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  // Optional so payloads from pre-Slack servers still decode.
+  slackThreads: Schema.optional(Schema.Array(ThreadSlackThreadLink)),
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   createdAt: IsoDateTime,
@@ -892,6 +913,8 @@ export const OrchestrationThreadShell = Schema.Struct({
   pullRequests: Schema.Array(ThreadPullRequestLink).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  // Optional so payloads from pre-Slack servers still decode.
+  slackThreads: Schema.optional(Schema.Array(ThreadSlackThreadLink)),
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   createdAt: IsoDateTime,
@@ -1260,6 +1283,22 @@ const ThreadPullRequestUnlinkCommand = Schema.Struct({
   ...ThreadPullRequestKey.fields,
 });
 
+const ThreadSlackThreadLinkCommand = Schema.Struct({
+  type: Schema.Literal("thread.slack-thread.link"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  ...ThreadSlackThreadKey.fields,
+  url: TrimmedNonEmptyString,
+  source: ThreadSlackThreadLinkSource,
+});
+
+const ThreadSlackThreadUnlinkCommand = Schema.Struct({
+  type: Schema.Literal("thread.slack-thread.unlink"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  ...ThreadSlackThreadKey.fields,
+});
+
 const ThreadRuntimeModeSetCommand = Schema.Struct({
   type: Schema.Literal("thread.runtime-mode.set"),
   commandId: CommandId,
@@ -1430,6 +1469,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadPullRequestLinkCommand,
   ThreadPullRequestUnlinkCommand,
+  ThreadSlackThreadLinkCommand,
+  ThreadSlackThreadUnlinkCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
@@ -1463,6 +1504,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadPullRequestLinkCommand,
   ThreadPullRequestUnlinkCommand,
+  ThreadSlackThreadLinkCommand,
+  ThreadSlackThreadUnlinkCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
@@ -1691,6 +1734,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.pull-request-linked",
   "thread.pull-request-unlinked",
   "thread.pull-request-synced",
+  "thread.slack-thread-linked",
+  "thread.slack-thread-unlinked",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
   "thread.message-sent",
@@ -1871,6 +1916,20 @@ export const ThreadPullRequestSyncedPayload = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 export type ThreadPullRequestSyncedPayload = typeof ThreadPullRequestSyncedPayload.Type;
+
+export const ThreadSlackThreadLinkedPayload = Schema.Struct({
+  threadId: ThreadId,
+  link: ThreadSlackThreadLink,
+  updatedAt: IsoDateTime,
+});
+export type ThreadSlackThreadLinkedPayload = typeof ThreadSlackThreadLinkedPayload.Type;
+
+export const ThreadSlackThreadUnlinkedPayload = Schema.Struct({
+  threadId: ThreadId,
+  ...ThreadSlackThreadKey.fields,
+  updatedAt: IsoDateTime,
+});
+export type ThreadSlackThreadUnlinkedPayload = typeof ThreadSlackThreadUnlinkedPayload.Type;
 
 export const ThreadRuntimeModeSetPayload = Schema.Struct({
   threadId: ThreadId,
@@ -2108,6 +2167,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.pull-request-synced"),
     payload: ThreadPullRequestSyncedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.slack-thread-linked"),
+    payload: ThreadSlackThreadLinkedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.slack-thread-unlinked"),
+    payload: ThreadSlackThreadUnlinkedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

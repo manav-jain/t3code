@@ -49,6 +49,7 @@ import {
   FolderPlusIcon,
   LinkIcon,
   MessageSquareIcon,
+  MessagesSquareIcon,
   MonitorIcon,
   MoonIcon,
   PaletteIcon,
@@ -167,6 +168,7 @@ import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
 import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
+import { openLinkSlackThreadDialog } from "./slack/LinkSlackThreadDialog";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
 import { toggleThemeEditorForTheme } from "./settings/themeEditorStore";
 import { searchSettings, SETTINGS_SECTION_LABELS } from "./settings/settingsSearch";
@@ -1817,6 +1819,35 @@ function OpenCommandPaletteDialog(props: {
         },
       });
     }
+  }
+
+  if (
+    activeThread !== null &&
+    activeThreadServerConfig?.environment.capabilities.threadSlackThreads === true
+  ) {
+    const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
+    actionItems.push(
+      {
+        kind: "action",
+        value: "action:link-slack-thread",
+        searchTerms: ["link", "slack", "attach", "capture", "discussion"],
+        title: "Link Slack thread to thread",
+        icon: <MessagesSquareIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          openLinkSlackThreadDialog(threadRef);
+        },
+      },
+      {
+        kind: "action",
+        value: "action:open-thread-slack-threads",
+        searchTerms: ["slack", "linked", "threads", "discussion"],
+        title: "Show linked Slack threads",
+        icon: <MessagesSquareIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          useRightPanelStore.getState().open(threadRef, "slack-threads");
+        },
+      },
+    );
   }
 
   actionItems.push({

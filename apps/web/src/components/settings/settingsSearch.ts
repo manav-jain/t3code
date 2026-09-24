@@ -588,6 +588,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["xcode android studio sdk avd runtime"],
   },
   {
+    id: "slack",
+    title: "Slack",
+    to: "/settings/integrations",
+    searchTerms: ["slack token threads link capture channels history users read xoxp"],
+    environmentOnly: true,
+  },
+  {
     id: "browser-profiles",
     title: "Browser profiles",
     to: "/settings/integrations",

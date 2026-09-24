@@ -14,6 +14,7 @@ import type {
   TurnId,
 } from "@t3tools/contracts";
 import { threadPullRequestKeysEqual } from "@t3tools/shared/threadPullRequests";
+import { slackThreadKeysEqual } from "@t3tools/shared/slackThreadUrl";
 import { isImportedAgentSessionMessageId } from "@t3tools/contracts";
 import { compareDateTimeStrings } from "@t3tools/shared/dateTime";
 
@@ -314,6 +315,23 @@ export function applyThreadDetailEvent(
         ),
         event.payload.updatedAt,
       );
+    }
+
+    case "thread.slack-thread-linked":
+    case "thread.slack-thread-unlinked": {
+      const key = event.type === "thread.slack-thread-linked" ? event.payload.link : event.payload;
+      const others = (thread.slackThreads ?? []).filter(
+        (existing) => !slackThreadKeysEqual(existing, key),
+      );
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          slackThreads:
+            event.type === "thread.slack-thread-linked" ? [...others, event.payload.link] : others,
+          updatedAt: event.payload.updatedAt,
+        },
+      };
     }
 
     case "thread.runtime-mode-set":

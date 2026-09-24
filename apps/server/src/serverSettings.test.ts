@@ -1278,6 +1278,28 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("keeps the Slack token outside settings.json and redacted for clients", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+
+      const saved = yield* serverSettings.updateSettings({ slack: { token: "xoxp-secret" } });
+      assert.equal(saved.slack.token, "xoxp-secret");
+      assert.notInclude(yield* fileSystem.readFileString(serverConfig.settingsPath), "xoxp-secret");
+
+      // A client only ever sees the marker, and sending it back keeps the token.
+      const marker = ServerSettingsModule.redactServerSettingsForClient(saved).slack.token;
+      assert.notEqual(marker, "xoxp-secret");
+      const kept = yield* serverSettings.updateSettings({ slack: { token: marker } });
+      assert.equal(kept.slack.token, "xoxp-secret");
+
+      const cleared = yield* serverSettings.updateSettings({ slack: { token: "" } });
+      assert.equal(cleared.slack.token, "");
+      assert.equal(ServerSettingsModule.redactServerSettingsForClient(cleared).slack.token, "");
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("materializes provider secrets for terminal environment resolution", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;

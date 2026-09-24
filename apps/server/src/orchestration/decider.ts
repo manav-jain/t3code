@@ -21,6 +21,7 @@ import {
   threadPullRequestKeysEqual,
 } from "@t3tools/shared/threadPullRequests";
 import { compareDateTimeStrings } from "@t3tools/shared/dateTime";
+import { slackThreadKeysEqual } from "@t3tools/shared/slackThreadUrl";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -1129,6 +1130,71 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           ...key,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.slack-thread.link": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if ((thread.slackThreads ?? []).some((link) => slackThreadKeysEqual(link, command))) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Slack thread ${command.channelId}/${command.threadTs} is already linked to thread ${command.threadId}`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.slack-thread-linked",
+        payload: {
+          threadId: command.threadId,
+          link: {
+            channelId: command.channelId,
+            threadTs: command.threadTs,
+            url: command.url,
+            source: command.source,
+            linkedAt: occurredAt,
+          },
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.slack-thread.unlink": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (!(thread.slackThreads ?? []).some((link) => slackThreadKeysEqual(link, command))) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Slack thread ${command.channelId}/${command.threadTs} is not linked to thread ${command.threadId}`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.slack-thread-unlinked",
+        payload: {
+          threadId: command.threadId,
+          channelId: command.channelId,
+          threadTs: command.threadTs,
           updatedAt: occurredAt,
         },
       };

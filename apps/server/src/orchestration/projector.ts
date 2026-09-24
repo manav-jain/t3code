@@ -13,6 +13,8 @@ import {
   OrchestrationMessage,
   OrchestrationSession,
   OrchestrationThread,
+  ThreadSlackThreadLinkedPayload,
+  ThreadSlackThreadUnlinkedPayload,
   WORKTREE_SETUP_ACTIVITY_KIND,
 } from "@t3tools/contracts";
 import {
@@ -21,6 +23,7 @@ import {
   threadPullRequestKeysEqual,
 } from "@t3tools/shared/threadPullRequests";
 import { compareDateTimeStrings } from "@t3tools/shared/dateTime";
+import { slackThreadKeysEqual } from "@t3tools/shared/slackThreadUrl";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Predicate from "effect/Predicate";
@@ -431,6 +434,7 @@ export function projectEvent(
             branch: payload.branch,
             worktreePath: payload.worktreePath,
             pullRequests: [],
+            slackThreads: [],
             branchPullRequest: null,
             latestTurn: null,
             createdAt: payload.createdAt,
@@ -686,6 +690,55 @@ export function projectEvent(
             }),
           };
         }),
+      );
+
+    case "thread.slack-thread-linked":
+      return decodeForEvent(
+        ThreadSlackThreadLinkedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: nextBase.threads.map((thread) =>
+            thread.id === payload.threadId
+              ? {
+                  ...thread,
+                  slackThreads: [
+                    ...(thread.slackThreads ?? []).filter(
+                      (link) => !slackThreadKeysEqual(link, payload.link),
+                    ),
+                    payload.link,
+                  ],
+                  updatedAt: payload.updatedAt,
+                }
+              : thread,
+          ),
+        })),
+      );
+
+    case "thread.slack-thread-unlinked":
+      return decodeForEvent(
+        ThreadSlackThreadUnlinkedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: nextBase.threads.map((thread) =>
+            thread.id === payload.threadId
+              ? {
+                  ...thread,
+                  slackThreads: (thread.slackThreads ?? []).filter(
+                    (link) => !slackThreadKeysEqual(link, payload),
+                  ),
+                  updatedAt: payload.updatedAt,
+                }
+              : thread,
+          ),
+        })),
       );
 
     case "thread.pull-request-synced":
