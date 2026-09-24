@@ -109,6 +109,9 @@ export function StorageSettingsPanel() {
       : undefined;
   const update = (patch: Partial<StorageCleanupSettings>) =>
     updateSettings({ storageCleanup: patch });
+  const supportsSettleRule = connectedEnvironments.every(
+    (environment) => environment.serverConfig?.environment.capabilities.worktreeCleanupOnSettle,
+  );
   const updateWorktree = (patch: Partial<WorktreeCleanupRules>) =>
     isProjectScope
       ? updateSettings({ worktreeCleanup: { mode: "custom", rules: patch } })
@@ -210,6 +213,21 @@ export function StorageSettingsPanel() {
                 />
               }
             />
+            {supportsSettleRule && (
+              <SettingsRow
+                title="Delete worktrees when threads settle"
+                status={ruleStatus("worktreeOnSettle")}
+                description="Remove a thread's worktree once it is settled and idle. Worktrees with local changes are kept, and the branch is checked out again if the thread resumes."
+                serverScoped={!isProjectScope}
+                control={
+                  <Switch
+                    aria-label="Delete worktrees when threads settle"
+                    checked={settings.worktreeOnSettle}
+                    onCheckedChange={(worktreeOnSettle) => updateWorktree({ worktreeOnSettle })}
+                  />
+                }
+              />
+            )}
             <SettingsRow
               title="Delete inactive worktrees"
               status={ruleStatus("worktreeAfterDays")}
