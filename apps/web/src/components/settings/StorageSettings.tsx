@@ -215,15 +215,17 @@ export function StorageSettingsPanel() {
             />
             {supportsSettleRule && (
               <SettingsRow
-                title="Delete worktrees when threads settle"
-                status={ruleStatus("worktreeOnSettle")}
-                description="Remove a thread's worktree once it is settled and idle. Worktrees with local changes are kept, and the branch is checked out again if the thread resumes."
+                title="Delete settled worktrees"
+                status={ruleStatus("worktreeSettledAfterDays")}
+                description="Remove a thread's worktree once the thread has been settled for this many days. Worktrees with local changes are kept, and the branch is checked out again if the thread resumes."
                 serverScoped={!isProjectScope}
                 control={
-                  <Switch
-                    aria-label="Delete worktrees when threads settle"
-                    checked={settings.worktreeOnSettle}
-                    onCheckedChange={(worktreeOnSettle) => updateWorktree({ worktreeOnSettle })}
+                  <RetentionControl
+                    label="Delete settled worktrees"
+                    value={settings.worktreeSettledAfterDays}
+                    onChange={(worktreeSettledAfterDays) =>
+                      updateWorktree({ worktreeSettledAfterDays })
+                    }
                   />
                 }
               />

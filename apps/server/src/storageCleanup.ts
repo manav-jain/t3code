@@ -51,7 +51,7 @@ const worktreeCleanupEnabled = (rules: WorktreeCleanupRules) =>
   rules.worktreeOnMerge ||
   rules.worktreeOnDelete ||
   rules.worktreeUnchanged ||
-  rules.worktreeOnSettle;
+  rules.worktreeSettledAfterDays !== null;
 
 function anyWorktreePolicy(
   settings: ServerSettings,
@@ -205,8 +205,13 @@ export const make = Effect.gen(function* () {
       if (!worktreeCleanupEnabled(settings)) continue;
       const worktreePath = path.resolve(thread.worktreePath!);
       const deleted = "deletedAt" in thread;
-      const settled = !deleted && settings.worktreeOnSettle && thread.settledOverride === "settled";
-      // Settle is decided without Git; skip the Git checks when no other rule can apply.
+      const settled =
+        !deleted &&
+        settings.worktreeSettledAfterDays !== null &&
+        thread.settledOverride === "settled" &&
+        thread.settledAt != null &&
+        Date.parse(thread.settledAt) < now - settings.worktreeSettledAfterDays * DAY_MS;
+      // Settled age is decided without Git; skip the Git checks when no other rule can apply.
       if (
         !deleted &&
         !settled &&
@@ -479,16 +484,10 @@ export const make = Effect.gen(function* () {
         return worker.enqueue(undefined);
       }),
     );
-    // Settling only requests a session stop, and cleanup waits for the stopped
-    // session, so the settle rule also rechecks when a session stops.
-    // ponytail: one full sweep per event; coalesce enqueues if settle bursts get slow.
     yield* forkParked(
       Stream.runForEach(events, (event) =>
-        (event.type === "thread.deleted" &&
-          anyWorktreePolicy(lastSettings, (rules) => rules.worktreeOnDelete)) ||
-        (((event.type === "thread.settled" && event.metadata.historyImport !== true) ||
-          (event.type === "thread.session-set" && event.payload.session.status === "stopped")) &&
-          anyWorktreePolicy(lastSettings, (rules) => rules.worktreeOnSettle))
+        event.type === "thread.deleted" &&
+        anyWorktreePolicy(lastSettings, (rules) => rules.worktreeOnDelete)
           ? worker.enqueue(undefined)
           : Effect.void,
       ),
