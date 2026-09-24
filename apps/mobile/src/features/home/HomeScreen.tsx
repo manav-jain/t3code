@@ -34,9 +34,11 @@ import { usePendingThreadOrder } from "../../state/thread-order";
 import { environmentServerConfigsAtom } from "../../state/server";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import { useQueuedThreadKeys } from "../../state/use-thread-outbox";
+import { listThreadGroupNames } from "@t3tools/client-runtime/state/thread-sort";
 import {
   ThreadListV2PendingRow,
   ThreadListV2Row,
+  ThreadListV2SectionDivider,
   ThreadListV2SettledShelfHeader,
   ThreadListV2ShowMoreRow,
   ThreadListV2SnoozedShelfHeader,
@@ -102,6 +104,8 @@ interface HomeScreenProps {
   ) => Promise<boolean>;
   readonly onRenameThread: (thread: EnvironmentThreadShell) => void;
   readonly onRegenerateThreadTitle: (thread: EnvironmentThreadShell) => Promise<boolean>;
+  readonly onSetThreadGroup: (thread: EnvironmentThreadShell, groupName: string | null) => void;
+  readonly onPromptThreadGroup: (thread: EnvironmentThreadShell) => void;
   readonly onSelectPendingTask: (pendingTask: PendingNewTask) => void;
   readonly onDeletePendingTask: (pendingTask: PendingNewTask) => void;
   readonly onNewThreadOnBranch: (thread: EnvironmentThreadShell) => void;
@@ -483,6 +487,25 @@ export function HomeScreen(props: HomeScreenProps) {
     }
     return supported;
   }, [serverConfigs]);
+  const groupEnvironmentIds = useMemo(() => {
+    const supported = new Set<EnvironmentId>();
+    for (const [environmentId, config] of serverConfigs) {
+      if (config.environment.capabilities.threadGroups === true) {
+        supported.add(environmentId);
+      }
+    }
+    return supported;
+  }, [serverConfigs]);
+  // Rows memoize on this array, so it keeps its identity until the set of
+  // group names actually changes.
+  const threadGroupNamesKey = useMemo(
+    () => listThreadGroupNames(props.threads).join("\u0000"),
+    [props.threads],
+  );
+  const threadGroupNames = useMemo(
+    () => (threadGroupNamesKey === "" ? [] : threadGroupNamesKey.split("\u0000")),
+    [threadGroupNamesKey],
+  );
   const machineByEnvironmentId = useMemo(
     () =>
       new Map(
@@ -616,6 +639,7 @@ export function HomeScreen(props: HomeScreenProps) {
         settledCount: threadListV2Layout.settledCount,
         settledShelfExpanded,
         settledShelfHeaderIndex: threadListV2Layout.settledShelfHeaderIndex,
+        groupHeaders: threadListV2Layout.groupHeaders,
         snoozeLabelNow: `${nowMinute}:00.000Z`,
         snoozeEnvironmentIds,
         queuedThreadKeys,
@@ -683,6 +707,9 @@ export function HomeScreen(props: HomeScreenProps) {
           />
         );
       }
+      if (item.type === "v2-group-header") {
+        return <ThreadListV2SectionDivider label={`${item.name} (${item.count})`} />;
+      }
       const thread = item.item.thread;
       return (
         <ThreadListV2Row
@@ -739,6 +766,9 @@ export function HomeScreen(props: HomeScreenProps) {
           onPinThread={handlePinThread}
           onUnpinThread={handleUnpinThread}
           onMoveThread={handleMoveThread}
+          groupNames={groupEnvironmentIds.has(thread.environmentId) ? threadGroupNames : undefined}
+          onSetThreadGroup={props.onSetThreadGroup}
+          onPromptThreadGroup={props.onPromptThreadGroup}
           onSwipeableClose={handleSwipeableClose}
           onSwipeableWillOpen={handleSwipeableWillOpen}
         />
@@ -747,6 +777,7 @@ export function HomeScreen(props: HomeScreenProps) {
     [
       handleDeleteThread,
       activeReorderEnvironmentIds,
+      groupEnvironmentIds,
       handleMoveThread,
       handlePinThread,
       handleRegenerateThreadTitle,
@@ -767,10 +798,13 @@ export function HomeScreen(props: HomeScreenProps) {
       props.onSelectPendingTask,
       props.onSelectThread,
       props.onNewThreadOnBranch,
+      props.onPromptThreadGroup,
+      props.onSetThreadGroup,
       props.savedConnectionsById,
       resolveProviderInstance,
       settlementEnvironmentIds,
       snoozeEnvironmentIds,
+      threadGroupNames,
       threadSearchMatchByKey,
       titleRegenerationEnvironmentIds,
       toggleSettledShelf,
@@ -792,6 +826,7 @@ export function HomeScreen(props: HomeScreenProps) {
       serverConfigs,
       savedConnectionsById: props.savedConnectionsById,
       searchQuery: props.searchQuery,
+      threadGroupNames,
       threadSearchMatchByKey,
     }),
     [
@@ -799,6 +834,7 @@ export function HomeScreen(props: HomeScreenProps) {
       props.searchQuery,
       props.savedConnectionsById,
       serverConfigs,
+      threadGroupNames,
       threadSearchMatchByKey,
       v2ProjectTitleByProjectKey,
     ],

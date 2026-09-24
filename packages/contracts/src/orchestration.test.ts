@@ -36,6 +36,7 @@ import {
   SnapShotAccessibility,
   isProviderSendTurnSupportedImageMimeType,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+  THREAD_GROUP_NAME_MAX_LENGTH,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
@@ -1120,6 +1121,20 @@ it.effect("accepts a title regeneration intent in thread.meta.update", () =>
     assert.strictEqual(parsed.type, "thread.meta.update");
     if (parsed.type === "thread.meta.update") {
       assert.strictEqual(parsed.regenerateTitle, true);
+    }
+  }),
+);
+
+it.effect("trims thread group names and rejects empty or overlong ones", () =>
+  Effect.gen(function* () {
+    const command = { type: "thread.meta.update", commandId: "cmd-group", threadId: "thread-1" };
+    const parsed = yield* decodeOrchestrationCommand({ ...command, groupName: "  Work  " });
+    assert.deepInclude(parsed, { groupName: "Work" });
+    const cleared = yield* decodeOrchestrationCommand({ ...command, groupName: null });
+    assert.deepInclude(cleared, { groupName: null });
+    for (const groupName of ["   ", "x".repeat(THREAD_GROUP_NAME_MAX_LENGTH + 1)]) {
+      const result = yield* Effect.exit(decodeOrchestrationCommand({ ...command, groupName }));
+      assert.strictEqual(Exit.isFailure(result), true);
     }
   }),
 );

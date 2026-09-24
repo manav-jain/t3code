@@ -55,9 +55,11 @@ import { useMaterialFabScroll } from "../home/MaterialFabScrollContext";
 import { SidebarFilterButton } from "./sidebar-filter-button";
 import { createSidebarHeaderItems } from "./sidebar-native-header-items";
 import { SidebarNavigationShell } from "./sidebar-navigation-shell";
+import { listThreadGroupNames } from "@t3tools/client-runtime/state/thread-sort";
 import {
   ThreadListV2PendingRow,
   ThreadListV2Row,
+  ThreadListV2SectionDivider,
   ThreadListV2SettledShelfHeader,
   ThreadListV2ShowMoreRow,
   ThreadListV2SnoozedShelfHeader,
@@ -153,6 +155,8 @@ function ThreadNavigationSidebarPane(
     moveThread,
     renameThread,
     regenerateThreadTitle,
+    setThreadGroup,
+    promptThreadGroup,
   } = useThreadListActions();
   const pendingTasks = usePendingNewTasks();
   const queuedThreadKeys = useQueuedThreadKeys();
@@ -361,6 +365,25 @@ function ThreadNavigationSidebarPane(
     }
     return supported;
   }, [serverConfigs]);
+  const groupEnvironmentIds = useMemo(() => {
+    const supported = new Set<EnvironmentId>();
+    for (const [environmentId, config] of serverConfigs) {
+      if (config.environment.capabilities.threadGroups === true) {
+        supported.add(environmentId);
+      }
+    }
+    return supported;
+  }, [serverConfigs]);
+  // Rows memoize on this array, so it keeps its identity until the set of
+  // group names actually changes.
+  const threadGroupNamesKey = useMemo(
+    () => listThreadGroupNames(threads).join("\u0000"),
+    [threads],
+  );
+  const threadGroupNames = useMemo(
+    () => (threadGroupNamesKey === "" ? [] : threadGroupNamesKey.split("\u0000")),
+    [threadGroupNamesKey],
+  );
   const machineByEnvironmentId = useMemo(
     () =>
       new Map(
@@ -489,6 +512,7 @@ function ThreadNavigationSidebarPane(
       settledCount: threadListV2Layout.settledCount,
       settledShelfExpanded,
       settledShelfHeaderIndex: threadListV2Layout.settledShelfHeaderIndex,
+      groupHeaders: threadListV2Layout.groupHeaders,
       snoozeLabelNow: `${nowMinute}:00.000Z`,
       snoozeEnvironmentIds,
       queuedThreadKeys,
@@ -645,6 +669,7 @@ function ThreadNavigationSidebarPane(
       projectTitleByProjectKey,
       savedConnectionsById,
       serverConfigs,
+      threadGroupNames,
       threadSearchMatchByKey,
     }),
     [
@@ -653,6 +678,7 @@ function ThreadNavigationSidebarPane(
       projectTitleByProjectKey,
       savedConnectionsById,
       serverConfigs,
+      threadGroupNames,
       threadSearchMatchByKey,
     ],
   );
@@ -779,12 +805,21 @@ function ThreadNavigationSidebarPane(
               onPinThread={pinThread}
               onUnpinThread={unpinThread}
               onMoveThread={moveThread}
+              groupNames={
+                groupEnvironmentIds.has(thread.environmentId) ? threadGroupNames : undefined
+              }
+              onSetThreadGroup={setThreadGroup}
+              onPromptThreadGroup={promptThreadGroup}
               onSwipeableClose={handleSwipeableClose}
               onSwipeableWillOpen={handleSwipeableWillOpen}
               simultaneousSwipeGesture={sidebarScrollGesture}
             />
           );
         }
+        case "v2-group-header":
+          return (
+            <ThreadListV2SectionDivider label={`${item.name} (${item.count})`} pane="sidebar" />
+          );
         case "v2-snoozed-shelf":
           return (
             <ThreadListV2SnoozedShelfHeader
@@ -818,6 +853,10 @@ function ThreadNavigationSidebarPane(
     [
       archiveThread,
       activeReorderEnvironmentIds,
+      groupEnvironmentIds,
+      promptThreadGroup,
+      setThreadGroup,
+      threadGroupNames,
       confirmDeletePendingTask,
       confirmDeleteThread,
       handleSelectThread,

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildThreadActionMenuItems, type ThreadActionMenuState } from "./threadActionMenu.logic";
+import {
+  buildThreadActionMenuItems,
+  resolveThreadGroupMenuPick,
+  type ThreadActionMenuState,
+} from "./threadActionMenu.logic";
 
 const baseState: ThreadActionMenuState = {
   branch: null,
@@ -10,8 +14,16 @@ const baseState: ThreadActionMenuState = {
   isSnoozed: false,
   canSnoozeNow: true,
   isRegeneratingTitle: false,
+  groupName: null,
+  groupNames: [],
   isRunning: false,
-  supports: { settlement: true, snooze: true, pinning: true, titleRegeneration: true },
+  supports: {
+    settlement: true,
+    snooze: true,
+    pinning: true,
+    titleRegeneration: true,
+    groups: true,
+  },
   snoozePresets: [
     { id: "hour", label: "In 1 hour", whenLabel: "3:00 PM", snoozedUntil: "2026-08-07T15:00:00Z" },
   ],
@@ -32,7 +44,13 @@ describe("buildThreadActionMenuItems", () => {
     expect(
       ids({
         ...baseState,
-        supports: { settlement: false, snooze: false, pinning: false, titleRegeneration: false },
+        supports: {
+          settlement: false,
+          snooze: false,
+          pinning: false,
+          titleRegeneration: false,
+          groups: false,
+        },
       }),
     ).toEqual(["rename", "mark-unread", "copy", "project-settings", "archive", "delete"]);
   });
@@ -117,9 +135,44 @@ describe("buildThreadActionMenuItems", () => {
     expect(
       ids({
         ...baseState,
-        supports: { settlement: false, snooze: false, pinning: false, titleRegeneration: false },
+        supports: {
+          settlement: false,
+          snooze: false,
+          pinning: false,
+          titleRegeneration: false,
+          groups: false,
+        },
       }),
     ).toContain("archive");
+  });
+
+  it("lists existing groups with the current one disabled, then new and remove", () => {
+    const moveTo = (groupName: string | null) =>
+      buildThreadActionMenuItems({
+        ...baseState,
+        groupName,
+        groupNames: ["Personal", "Work"],
+      }).find((item) => item.id === "move-to-group");
+    expect(moveTo("Work")?.children).toEqual([
+      { id: "group:Personal", label: "Personal", disabled: false },
+      { id: "group:Work", label: "Work", disabled: true },
+      { id: "new-group", label: "New group…", separatorBefore: true },
+      { id: "remove-from-group", label: "Remove from group" },
+    ]);
+    expect(moveTo(null)?.children?.map((item) => item.id)).toEqual([
+      "group:Personal",
+      "group:Work",
+      "new-group",
+    ]);
+  });
+
+  it("resolves a group pick to the name to assign, or null to remove", async () => {
+    const ask = async () => "Fresh";
+    expect(await resolveThreadGroupMenuPick("group:Side: projects", ask)).toBe("Side: projects");
+    expect(await resolveThreadGroupMenuPick("remove-from-group", ask)).toBeNull();
+    expect(await resolveThreadGroupMenuPick("new-group", ask)).toBe("Fresh");
+    expect(await resolveThreadGroupMenuPick("new-group", async () => null)).toBeUndefined();
+    expect(await resolveThreadGroupMenuPick("rename", ask)).toBeUndefined();
   });
 
   it("disables archive while the thread is running", () => {

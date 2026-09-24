@@ -37,6 +37,7 @@ import {
   pinOrderKeyBetween,
   planPinnedReorder,
   planSidebarThreadDrop,
+  sidebarGroupMarker,
   sidebarMarkerId,
   sidebarListItemId,
   sortPinnedThreadsForSidebar,
@@ -52,6 +53,7 @@ import {
   resolveSidebarDropVerb,
 } from "./Sidebar.logic";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
+import { groupActiveThreads } from "@t3tools/client-runtime/state/thread-sort";
 import {
   EnvironmentId,
   OrchestrationLatestTurn,
@@ -1113,6 +1115,7 @@ describe("resolveSidebarDropTarget", () => {
     expect(new Set(list.map(sidebarListItemId)).size).toBe(list.length);
     expect(resolveSidebarDropTarget(list, key, "env:other")).toEqual({
       section: "pinned",
+      group: null,
       pinnedOrder: ["env:other", key],
       activeOrder: [],
     });
@@ -1121,16 +1124,19 @@ describe("resolveSidebarDropTarget", () => {
   it("reads the section off the markers above the gap", () => {
     expect(resolve("p1", "a2")).toEqual({
       section: "active",
+      group: null,
       pinnedOrder: ["p2"],
       activeOrder: ["a1", "a2", "p1"],
     });
     expect(resolve("a1", "s1")).toEqual({
       section: "settled",
+      group: null,
       pinnedOrder: ["p1", "p2"],
       activeOrder: ["a2"],
     });
     expect(resolve("s1", "a1")).toEqual({
       section: "active",
+      group: null,
       pinnedOrder: ["p1", "p2"],
       activeOrder: ["s1", "a1", "a2"],
     });
@@ -1141,6 +1147,7 @@ describe("resolveSidebarDropTarget", () => {
     // the last pinned row.
     expect(resolve("a1", sidebarMarkerId("pinned-divider"))).toEqual({
       section: "pinned",
+      group: null,
       pinnedOrder: ["p1", "p2", "a1"],
       activeOrder: ["a2"],
     });
@@ -1148,6 +1155,7 @@ describe("resolveSidebarDropTarget", () => {
     // first inbox row — an unpin.
     expect(resolve("p2", sidebarMarkerId("pinned-divider"))).toEqual({
       section: "active",
+      group: null,
       pinnedOrder: ["p1"],
       activeOrder: ["p2", "a1", "a2"],
     });
@@ -1161,11 +1169,13 @@ describe("resolveSidebarDropTarget", () => {
   it("reorders inside the pinned block with the dragged row at the over slot", () => {
     expect(resolve("p1", "p2")).toEqual({
       section: "pinned",
+      group: null,
       pinnedOrder: ["p2", "p1"],
       activeOrder: ["a1", "a2"],
     });
     expect(resolve("a2", "p1")).toEqual({
       section: "pinned",
+      group: null,
       pinnedOrder: ["a2", "p1", "p2"],
       activeOrder: ["a1"],
     });
@@ -1174,6 +1184,7 @@ describe("resolveSidebarDropTarget", () => {
   it("lands first in Pinned when hovering its permanent header", () => {
     expect(resolve("a2", sidebarMarkerId("pinned-header"))).toEqual({
       section: "pinned",
+      group: null,
       pinnedOrder: ["a2", "p1", "p2"],
       activeOrder: ["a1"],
     });
@@ -1186,6 +1197,7 @@ describe("resolveSidebarDropTarget", () => {
     ] as const) {
       expect(resolve(from, to)).toEqual({
         section: "active",
+        group: null,
         pinnedOrder: ["p1", "p2"],
         activeOrder: ["a2", "a1"],
       });
@@ -1207,7 +1219,7 @@ describe("resolveSidebarDropTarget", () => {
     ];
     expect(
       resolveSidebarDropTarget(withPlaceholder, "a1", sidebarMarkerId("settled-placeholder")),
-    ).toEqual({ section: "settled", pinnedOrder: [], activeOrder: [] });
+    ).toEqual({ section: "settled", group: null, pinnedOrder: [], activeOrder: [] });
   });
 
   it("lands in empty Pinned using its header without an extra placeholder", () => {
@@ -1218,11 +1230,13 @@ describe("resolveSidebarDropTarget", () => {
     ];
     expect(resolveSidebarDropTarget(emptyPinned, "a1", sidebarMarkerId("pinned-header"))).toEqual({
       section: "pinned",
+      group: null,
       pinnedOrder: ["a1"],
       activeOrder: [],
     });
     expect(resolveSidebarDropTarget(emptyPinned, "a1", sidebarMarkerId("pinned-divider"))).toEqual({
       section: "pinned",
+      group: null,
       pinnedOrder: ["a1"],
       activeOrder: [],
     });
@@ -1232,6 +1246,143 @@ describe("resolveSidebarDropTarget", () => {
     expect(resolve("a1", "nope")).toBeNull();
     expect(resolve("nope", "a1")).toBeNull();
     expect(resolve(sidebarMarkerId("pinned-divider"), "a1")).toBeNull();
+  });
+});
+
+describe("sidebar thread groups", () => {
+  const thread = (key: string): SidebarListItem => ({ kind: "thread", key, section: "active" });
+  const marker = (marker: SidebarListMarker): SidebarListItem => ({ kind: "marker", marker });
+  const workHeader = sidebarMarkerId(sidebarGroupMarker("Work"));
+  const zetaHeader = sidebarMarkerId(sidebarGroupMarker("Zeta"));
+  // Active: u1 | Work: w1 w2 | Zeta: z1
+  const items: readonly SidebarListItem[] = [
+    marker("pinned-header"),
+    marker("pinned-divider"),
+    marker("active-placeholder"),
+    thread("u1"),
+    marker(sidebarGroupMarker("Work")),
+    thread("w1"),
+    thread("w2"),
+    marker(sidebarGroupMarker("Zeta")),
+    thread("z1"),
+    marker("settled-header"),
+    marker("settled-placeholder"),
+  ];
+  const groupsById = new Map([
+    ["w1", "Work"],
+    ["w2", "Work"],
+    ["z1", "Zeta"],
+  ]);
+  // Keys interleave across groups: only the landing run's neighbors matter.
+  const activeKeysById = new Map<string, string | null>([
+    ["u1", "m"],
+    ["w1", "c"],
+    ["w2", "x"],
+    ["z1", "e"],
+  ]);
+  const drop = (
+    activeKey: string,
+    overId: string,
+    overrides: Partial<Parameters<typeof planSidebarThreadDrop>[0]> = {},
+  ) =>
+    planSidebarThreadDrop({
+      activeKey,
+      activeSection: "active",
+      target: resolveSidebarDropTarget(items, activeKey, overId)!,
+      pinnedOrder: [],
+      pinnedKeysById: new Map(),
+      activeOrder: ["u1", "w1", "w2", "z1"],
+      activeKeysById,
+      groupsById,
+      ...overrides,
+    });
+  // What the sidebar renders once the plan's writes land.
+  const displayAfter = (plan: ReturnType<typeof planSidebarThreadDrop>, movedId: string) => {
+    if (plan.kind !== "move-active") throw new Error(`Expected move-active, got ${plan.kind}`);
+    const keys = new Map(activeKeysById);
+    for (const { id, orderKey } of plan.assignments) keys.set(id, orderKey);
+    const groups = new Map<string, string | null>(groupsById);
+    if (plan.groupName !== undefined) groups.set(movedId, plan.groupName);
+    const rows = ["u1", "w1", "w2", "z1"].map((id) => ({
+      id,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      activeOrderKey: keys.get(id) ?? null,
+      groupName: groups.get(id) ?? null,
+    }));
+    return groupActiveThreads(sortThreadsForSidebar(rows)).map((run) => [
+      run.name,
+      run.threads.map((row) => row.id),
+    ]);
+  };
+
+  it("partitions the active order: ungrouped first, then groups alphabetically", () => {
+    const rows = [
+      { id: "z1", groupName: "zeta" },
+      { id: "w1", groupName: "Work" },
+      { id: "u1", groupName: null },
+      { id: "a1", groupName: "alpha" },
+      { id: "w2", groupName: "Work" },
+      { id: "u2" },
+    ];
+    expect(
+      groupActiveThreads(rows).map((run) => [run.name, run.threads.map((row) => row.id)]),
+    ).toEqual([
+      [null, ["u1", "u2"]],
+      ["alpha", ["a1"]],
+      ["Work", ["w1", "w2"]],
+      ["zeta", ["z1"]],
+    ]);
+  });
+
+  it("reads the group off the last header above the gap", () => {
+    expect(resolveSidebarDropTarget(items, "u1", "w1")).toMatchObject({
+      section: "active",
+      group: "Work",
+      activeOrder: ["w1", "u1", "w2", "z1"],
+    });
+    // Hovered from above, a header takes the row in; from below, the row
+    // lands above it at the end of the previous run.
+    expect(resolveSidebarDropTarget(items, "u1", workHeader)?.group).toBe("Work");
+    expect(resolveSidebarDropTarget(items, "w1", workHeader)?.group).toBeNull();
+    expect(resolveSidebarDropTarget(items, "z1", zetaHeader)?.group).toBe("Work");
+  });
+
+  it("moves a thread into the group it lands in, exactly where it was dropped", () => {
+    const plan = drop("u1", "w1");
+    expect(plan).toMatchObject({ kind: "move-active", groupName: "Work" });
+    expect(plan.kind === "move-active" && plan.assignments).toHaveLength(1);
+    expect(displayAfter(plan, "u1")).toEqual([
+      ["Work", ["w1", "u1", "w2"]],
+      ["Zeta", ["z1"]],
+    ]);
+  });
+
+  it("regroups across a header even when the flat order is unchanged", () => {
+    const plan = drop("w2", zetaHeader);
+    expect(plan).toMatchObject({ kind: "move-active", groupName: "Zeta" });
+    expect(displayAfter(plan, "w2")).toEqual([
+      [null, ["u1"]],
+      ["Work", ["w1"]],
+      ["Zeta", ["w2", "z1"]],
+    ]);
+    expect(displayAfter(drop("w1", workHeader), "w1")).toEqual([
+      [null, ["u1", "w1"]],
+      ["Work", ["w2"]],
+      ["Zeta", ["z1"]],
+    ]);
+  });
+
+  it("reorders within a group without regrouping", () => {
+    const plan = drop("w2", "w1");
+    expect(plan.kind === "move-active" && plan.groupName).toBeUndefined();
+    expect(displayAfter(plan, "w2")).toContainEqual(["Work", ["w2", "w1"]]);
+    expect(drop("w1", "w1")).toEqual({ kind: "none" });
+  });
+
+  it("rejects regrouping on servers without groups and into collapsed groups", () => {
+    expect(drop("u1", "w1", { supportsGroups: false })).toEqual({ kind: "none" });
+    expect(drop("u1", "w1", { collapsedGroups: new Set(["Work"]) })).toEqual({ kind: "none" });
+    expect(drop("w2", "w1", { supportsGroups: false }).kind).toBe("move-active");
   });
 });
 
@@ -1250,8 +1401,12 @@ describe("planSidebarThreadDrop", () => {
     overrides: Partial<Omit<Parameters<typeof planSidebarThreadDrop>[0], "target">> & {
       activeKey: string;
       activeSection: "pinned" | "active" | "snoozed" | "settled";
-      target: Omit<Parameters<typeof planSidebarThreadDrop>[0]["target"], "activeOrder"> & {
+      target: Omit<
+        Parameters<typeof planSidebarThreadDrop>[0]["target"],
+        "activeOrder" | "group"
+      > & {
         activeOrder?: readonly string[];
+        group?: string | null;
       };
     },
   ) =>
@@ -1261,7 +1416,7 @@ describe("planSidebarThreadDrop", () => {
       activeOrder: ["a1", "a2", "a3"],
       activeKeysById,
       ...overrides,
-      target: { activeOrder: [], ...overrides.target },
+      target: { activeOrder: [], group: null, ...overrides.target },
     });
 
   it("allows old-server pinned reordering while rejecting settlement", () => {

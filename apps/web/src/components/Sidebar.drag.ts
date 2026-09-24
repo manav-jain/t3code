@@ -3,6 +3,7 @@ import { verticalListSortingStrategy, type SortingStrategy } from "@dnd-kit/sort
 import {
   resolveSidebarDropTarget,
   sidebarListItemId,
+  sidebarMarkerGroup,
   sidebarMarkerId,
   type SidebarListItem,
   type SidebarListMarker,
@@ -127,19 +128,29 @@ export function createSidebarSortingStrategy(input: {
     let cardHeight = input.cardHeight;
     let slimHeight = input.slimHeight;
     let headerScale: number | undefined;
+    // Active rows render as runs under their group headers.
+    const groupHeaders: Array<{ readonly item: SidebarListItem; readonly name: string }> = [];
+    const groupByKey = new Map<string, string | null>();
+    let currentGroup: string | null = null;
     for (const [index, item] of items.entries()) {
       if (item.kind === "marker") {
-        if (item.marker === "settled-header" || item.marker === "snoozed-header") {
+        const name = sidebarMarkerGroup(item.marker);
+        if (name !== null) {
+          currentGroup = name;
+          groupHeaders.push({ item, name });
+        } else if (item.marker === "settled-header" || item.marker === "snoozed-header") {
           const height = rects[index]?.height;
           if (height) headerScale ??= height / 32;
         }
         continue;
       }
+      if (item.section === "active") groupByKey.set(item.key, currentGroup);
       if (item.section === "pinned" || item.section === "active")
         cardHeight ??= rects[index]?.height;
       else slimHeight ??= rects[index]?.height;
       if (item.key !== active.key) groups[item.section].push(item);
     }
+    if (target.section === "active") groupByKey.set(active.key, target.group);
     // Cards are 4.875rem + 0.25rem padding; slim rows/placeholders are h-9.
     const scale =
       slimHeight !== undefined ? slimHeight / 36 : (headerScale ?? (cardHeight ?? 82) / 82);
@@ -176,10 +187,14 @@ export function createSidebarSortingStrategy(input: {
       if (groups[name].length > 0) projected.push(...groups[name]);
       else marker(`${name}-placeholder`);
     };
+    const activeRun = (name: string | null) =>
+      groups.active.filter((item) => (groupByKey.get(item.key) ?? null) === name);
     marker("pinned-header");
     projected.push(...groups.pinned);
     marker("pinned-divider");
-    section("active");
+    if (groups.active.length === 0) marker("active-placeholder");
+    projected.push(...activeRun(null));
+    for (const header of groupHeaders) projected.push(header.item, ...activeRun(header.name));
     if (
       groups.snoozed.length > 0 ||
       ((active.section !== "snoozed" || (input.snoozedThreadCount ?? 0) > 1) &&
@@ -201,7 +216,8 @@ export function createSidebarSortingStrategy(input: {
       return item.kind === "marker" &&
         (item.marker === "pinned-header" || item.marker === "pinned-divider")
         ? labelHeight
-        : item.kind === "marker" && item.marker.endsWith("placeholder")
+        : item.kind === "marker" &&
+            (item.marker === "active-placeholder" || item.marker === "settled-placeholder")
           ? slimHeight
           : moved
             ? fallback

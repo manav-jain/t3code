@@ -703,6 +703,13 @@ export const ThreadTitleRegeneration = Schema.Struct({
 });
 export type ThreadTitleRegeneration = typeof ThreadTitleRegeneration.Type;
 
+/** A manual sidebar group. Groups exist only as this per-thread name: the
+    group list is the distinct names across threads. */
+export const THREAD_GROUP_NAME_MAX_LENGTH = 64;
+export const ThreadGroupName = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(THREAD_GROUP_NAME_MAX_LENGTH),
+);
+
 /**
  * Legacy single-PR link. Still emitted as the thread's derived current pull
  * request (see `@t3tools/shared/threadPullRequests`) so clients from before
@@ -838,6 +845,9 @@ export const OrchestrationThread = Schema.Struct({
   // Manual Active placement. Keyless threads retain their creation/re-entry
   // order above the arranged run. Settling clears this slot.
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  // Manual group the active list shows this thread under. Optional so
+  // payloads from pre-group servers still decode.
+  groupName: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   // Pending-only state. Optional so older servers remain compatible.
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   titleState: Schema.optional(Schema.NullOr(ThreadTitleState)),
@@ -908,6 +918,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  groupName: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   titleState: Schema.optional(Schema.NullOr(ThreadTitleState)),
   session: Schema.NullOr(OrchestrationSession),
@@ -1236,6 +1247,8 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   expectedBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
+  /** Null removes the thread from its group. */
+  groupName: Schema.optional(Schema.NullOr(ThreadGroupName)),
 }).check(
   Schema.makeFilter(
     (input) =>
@@ -1827,9 +1840,10 @@ export const ThreadPinReorderedPayload = Schema.Struct({
 
 export const ThreadMetaUpdatedPayload = Schema.Struct({
   threadId: ThreadId,
-  // Order updates use this existing event so older clients can ignore the
-  // new field while continuing to decode the event stream.
+  // Order and group updates use this existing event so older clients can
+  // ignore the new fields while continuing to decode the event stream.
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  groupName: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   title: Schema.optional(TrimmedNonEmptyString),
   /** Intent marker consumed by the title-generation reactor. Keeping this on
       the existing event lets older clients safely ignore the new field. */
