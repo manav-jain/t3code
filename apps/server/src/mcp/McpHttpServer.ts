@@ -31,6 +31,8 @@ import {
 } from "./toolkits/preview/tools.ts";
 import { PullRequestsToolkitHandlersLive } from "./toolkits/pullRequests/handlers.ts";
 import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
+import { SlackToolkitHandlersLive } from "./toolkits/slack/handlers.ts";
+import { SlackToolkit } from "./toolkits/slack/tools.ts";
 import {
   DeviceScreenshotToolkitHandlersLive,
   DeviceStandardToolkitHandlersLive,
@@ -608,6 +610,10 @@ export const PullRequestsToolkitRegistrationLive = McpServer.toolkit(PullRequest
   Layer.provide(PullRequestsToolkitHandlersLive),
 );
 
+export const SlackToolkitRegistrationLive = McpServer.toolkit(SlackToolkit).pipe(
+  Layer.provide(SlackToolkitHandlersLive),
+);
+
 const DeviceStandardToolkitRegistrationLive = McpServer.toolkit(DeviceStandardToolkit).pipe(
   Layer.provide(DeviceStandardToolkitHandlersLive),
 );
@@ -631,5 +637,6 @@ const McpTransportLive = McpServer.layerHttp({
 export const layer = Layer.mergeAll(
   PreviewToolkitRegistrationLive,
   PullRequestsToolkitRegistrationLive,
+  SlackToolkitRegistrationLive,
   DeviceToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive));

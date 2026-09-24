@@ -22,6 +22,7 @@ import {
   FileDiff,
   Files,
   Globe2,
+  MessagesSquare,
   Plus,
   TerminalSquare,
   Volume2,
@@ -121,6 +122,7 @@ interface RightPanelTabsProps {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
+  onAddSlackThreads: () => void;
   onAddAgents: () => void;
   onAddDevice: () => void;
   browserAvailable: boolean;
@@ -129,6 +131,7 @@ interface RightPanelTabsProps {
   filesAvailable: boolean;
   pullRequestAvailable: boolean;
   pullRequestsAvailable: boolean;
+  slackThreadsAvailable: boolean;
   agentsAvailable: boolean;
   deviceAvailable: boolean;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
@@ -160,6 +163,7 @@ const SURFACE_DISABLED_REASONS = {
   diff: "Diff is only available for server threads in Git repositories.",
   pullRequest: "This thread's branch has no pull request yet.",
   pullRequests: "No linked pull requests are available for this thread.",
+  slackThreads: "Slack threads are only available for server threads.",
   agents: "Agents are only available from a thread.",
   device: "Devices are only available from a thread.",
 } as const;
@@ -184,6 +188,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   diff: "Available for Git repositories.",
   pullRequest: "No pull request on this branch yet.",
   pullRequests: "No linked pull requests available.",
+  slackThreads: "Available for server threads.",
   agents: "Available from a thread.",
   device: "Available from a thread.",
 } as const;
@@ -324,6 +329,7 @@ function RightPanelEmptyState(props: {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
+  onAddSlackThreads: () => void;
   onAddAgents: () => void;
   onAddDevice: () => void;
   browserAvailable: boolean;
@@ -332,6 +338,7 @@ function RightPanelEmptyState(props: {
   filesAvailable: boolean;
   pullRequestAvailable: boolean;
   pullRequestsAvailable: boolean;
+  slackThreadsAvailable: boolean;
   agentsAvailable: boolean;
   deviceAvailable: boolean;
   liveAgentCount: number;
@@ -392,6 +399,15 @@ function RightPanelEmptyState(props: {
       available: props.pullRequestsAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.pullRequests,
       onClick: props.onAddPullRequests,
+      badgeCount: 0,
+    },
+    {
+      label: "Slack threads",
+      icon: MessagesSquare,
+      shortcut: "S",
+      available: props.slackThreadsAvailable,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.slackThreads,
+      onClick: props.onAddSlackThreads,
       badgeCount: 0,
     },
     {
@@ -628,6 +644,8 @@ function surfaceTitle(
       return `#${surface.number}`;
     case "pull-requests":
       return "Pull requests";
+    case "slack-threads":
+      return "Slack threads";
     case "agents":
       return "Agents";
     case "device":
@@ -713,6 +731,8 @@ function SurfaceIcon({
       );
     case "pull-requests":
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
+    case "slack-threads":
+      return <MessagesSquare className="size-3 shrink-0" />;
     case "agents":
       return <Bot className="size-3 shrink-0" />;
     case "device":
@@ -916,6 +936,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       available: props.pullRequestsAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.pullRequests,
       onClick: props.onAddPullRequests,
+    },
+    {
+      label: "Slack threads",
+      icon: MessagesSquare,
+      shortcut: "S",
+      available: props.slackThreadsAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.slackThreads,
+      onClick: props.onAddSlackThreads,
     },
     {
       label: "Agents",
@@ -1413,6 +1441,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddFiles={props.onAddFiles}
             onAddPullRequest={props.onAddPullRequest}
             onAddPullRequests={props.onAddPullRequests}
+            onAddSlackThreads={props.onAddSlackThreads}
             onAddAgents={props.onAddAgents}
             onAddDevice={props.onAddDevice}
             browserAvailable={props.browserAvailable}
@@ -1421,6 +1450,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             filesAvailable={props.filesAvailable}
             pullRequestAvailable={props.pullRequestAvailable}
             pullRequestsAvailable={props.pullRequestsAvailable}
+            slackThreadsAvailable={props.slackThreadsAvailable}
             agentsAvailable={props.agentsAvailable}
             deviceAvailable={props.deviceAvailable}
             liveAgentCount={props.liveAgentCount}

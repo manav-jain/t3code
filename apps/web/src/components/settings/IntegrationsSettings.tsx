@@ -84,6 +84,7 @@ import {
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
+import { Input } from "../ui/input";
 import { NumberField, NumberFieldGroup, NumberFieldInput } from "../ui/number-field";
 import {
   Select,
@@ -101,6 +102,7 @@ import {
   persistClientSettingsUpdate,
   useClientSettings,
   useClientSettingsHydrated,
+  useUpdateEnvironmentSettings,
   useUpdatePrimarySettings,
 } from "~/hooks/useSettings";
 
@@ -621,6 +623,74 @@ function DeviceIntegrationSettings() {
         agentAccessEnabled={settings.enableAgentDeviceAccess}
       />
     </SettingsSection>
+  );
+}
+
+function SlackIntegrationSettings() {
+  const { environment: selected } = useSettingsScope();
+  if (selected?.connection.phase !== "connected" || selected.serverConfig === null) return null;
+  return (
+    <SettingsSection {...searchableSetting("slack")}>
+      <SlackTokenRow
+        key={selected.environmentId}
+        environmentId={selected.environmentId}
+        environmentLabel={selected.label}
+        // Clients only ever receive a redacted marker, so non-empty means a token is saved.
+        configured={selected.serverConfig.settings.slack.token.length > 0}
+      />
+    </SettingsSection>
+  );
+}
+
+function SlackTokenRow({
+  environmentId,
+  environmentLabel,
+  configured,
+}: {
+  environmentId: EnvironmentId;
+  environmentLabel: string;
+  configured: boolean;
+}) {
+  const updateSettings = useUpdateEnvironmentSettings(environmentId);
+  const [token, setToken] = useState("");
+  const save = () => {
+    if (token.trim().length === 0) return;
+    updateSettings({ slack: { token: token.trim() } });
+    setToken("");
+  };
+  return (
+    <SettingsRow
+      title="Slack token"
+      description={`Reads Slack threads linked to threads on ${environmentLabel}. Use a Slack app user token (xoxp-) with channels:history, groups:history, im:history, mpim:history, and users:read.`}
+      status={configured ? "A token is saved." : undefined}
+      control={
+        <div className="flex items-center gap-2">
+          <Input
+            type="password"
+            autoComplete="off"
+            aria-label="Slack token"
+            placeholder={configured ? "Replace token" : "xoxp-…"}
+            value={token}
+            onChange={(event) => setToken(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") save();
+            }}
+          />
+          <Button size="sm" variant="outline" disabled={token.trim().length === 0} onClick={save}>
+            Save
+          </Button>
+          {configured ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => updateSettings({ slack: { token: "" } })}
+            >
+              Remove
+            </Button>
+          ) : null}
+        </div>
+      }
+    />
   );
 }
 
@@ -1456,6 +1526,7 @@ export function IntegrationsSettingsPanel() {
         )}
       </SettingsSection>
       <DeviceIntegrationSettings />
+      <SlackIntegrationSettings />
     </SettingsPageContainer>
   );
 }

@@ -145,6 +145,7 @@ import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinar
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as SlackThreads from "./slack/SlackThreads.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
   clearPersistedServerRuntimeState,
@@ -591,6 +592,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   // Both transports consume the same service instance, so caches single-flight across clients
   // and mutations observed on WebSocket invalidate patches subsequently read over HTTP.
   Layer.provide(PullRequestServiceLive),
+  Layer.provide(SlackThreads.layer),
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(DesktopAppUpdateLayerLive))),
   Layer.provide(commandReadinessLayer),

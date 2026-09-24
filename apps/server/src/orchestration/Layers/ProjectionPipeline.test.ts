@@ -10,6 +10,7 @@ import {
   ThreadId,
   type ThreadPullRequestSnapshot,
   ThreadLinkedPullRequest,
+  ThreadSlackThreadLink,
   TurnId,
   ProviderInstanceId,
 } from "@t3tools/contracts";
@@ -951,6 +952,86 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-pull
         });
         yield* projectionPipeline.bootstrap;
         assert.deepEqual(yield* readLinks(), []);
+      }),
+    );
+  },
+);
+
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-slack-threads-")))(
+  "OrchestrationProjectionPipeline slack thread links",
+  (it) => {
+    it.effect("projects slack thread link and unlink into the thread row", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.make("thread-slack");
+        const t0 = "2026-01-01T00:00:00.000Z";
+        let counter = 0;
+        const base = () => {
+          counter += 1;
+          return {
+            eventId: EventId.make(`evt-slack-${counter}`),
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            occurredAt: t0,
+            commandId: CommandId.make(`cmd-slack-${counter}`),
+            causationEventId: null,
+            correlationId: CommandId.make(`cmd-slack-${counter}`),
+            metadata: {},
+          } as const;
+        };
+        const link = (threadTs: string) => ({
+          channelId: "C0123ABC",
+          threadTs,
+          url: `https://acme.slack.com/archives/C0123ABC/p${threadTs.replace(".", "")}`,
+          source: "manual" as const,
+          linkedAt: t0,
+        });
+        const decodeLinks = Schema.decodeUnknownEffect(
+          Schema.fromJsonString(Schema.Array(ThreadSlackThreadLink)),
+        );
+
+        yield* eventStore.append({
+          ...base(),
+          type: "thread.created",
+          payload: {
+            threadId,
+            projectId: ProjectId.make("project-slack"),
+            title: "Thread Slack",
+            modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: t0,
+            updatedAt: t0,
+          },
+        });
+        for (const threadTs of ["1712345678.000001", "1712345678.000002"]) {
+          yield* eventStore.append({
+            ...base(),
+            type: "thread.slack-thread-linked",
+            payload: { threadId, link: link(threadTs), updatedAt: t0 },
+          });
+        }
+        yield* eventStore.append({
+          ...base(),
+          type: "thread.slack-thread-unlinked",
+          payload: {
+            threadId,
+            channelId: "C0123ABC",
+            threadTs: "1712345678.000001",
+            updatedAt: t0,
+          },
+        });
+        yield* projectionPipeline.bootstrap;
+
+        const rows = yield* sql<{ readonly slackThreads: string }>`
+          SELECT slack_threads_json AS "slackThreads"
+          FROM projection_threads
+          WHERE thread_id = ${threadId}
+        `;
+        assert.deepEqual(yield* decodeLinks(rows[0]!.slackThreads), [link("1712345678.000002")]);
       }),
     );
   },

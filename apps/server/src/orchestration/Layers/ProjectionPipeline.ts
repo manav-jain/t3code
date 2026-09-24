@@ -8,6 +8,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { compareDateTimeStrings } from "@t3tools/shared/dateTime";
+import { slackThreadKeysEqual } from "@t3tools/shared/slackThreadUrl";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -621,6 +622,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             worktreePath: event.payload.worktreePath,
             linkedPullRequest: null,
             branchPullRequest: null,
+            slackThreads: [],
             latestTurnId: null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
@@ -928,6 +930,30 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           });
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "thread.slack-thread-linked":
+        case "thread.slack-thread-unlinked": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          const key =
+            event.type === "thread.slack-thread-linked" ? event.payload.link : event.payload;
+          const others = (existingRow.value.slackThreads ?? []).filter(
+            (link) => !slackThreadKeysEqual(link, key),
+          );
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            slackThreads:
+              event.type === "thread.slack-thread-linked"
+                ? [...others, event.payload.link]
+                : others,
             updatedAt: event.payload.updatedAt,
           });
           return;

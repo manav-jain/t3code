@@ -13,6 +13,7 @@ import {
   createAtomCommandScheduler,
   createEnvironmentCommand,
   createEnvironmentRpcCommand,
+  createEnvironmentRpcQueryAtomFamily,
 } from "./runtime.ts";
 import {
   type ArchiveThreadInput,
@@ -20,6 +21,7 @@ import {
   type DeleteThreadInput,
   type InterruptThreadTurnInput,
   type LinkThreadPullRequestInput,
+  type LinkThreadSlackThreadInput,
   type RespondToThreadApprovalInput,
   type RespondToThreadUserInputInput,
   type DismissThreadUserInputInput,
@@ -35,6 +37,7 @@ import {
   type StopThreadSessionInput,
   type UnarchiveThreadInput,
   type UnlinkThreadPullRequestInput,
+  type UnlinkThreadSlackThreadInput,
   type UnpinThreadInput,
   type UnsettleThreadInput,
   type UnsnoozeThreadInput,
@@ -44,6 +47,7 @@ import {
   deleteThread,
   interruptThreadTurn,
   linkThreadPullRequest,
+  linkThreadSlackThread,
   respondToThreadApproval,
   respondToThreadUserInput,
   dismissThreadUserInput,
@@ -59,6 +63,7 @@ import {
   stopThreadSession,
   unarchiveThread,
   unlinkThreadPullRequest,
+  unlinkThreadSlackThread,
   unpinThread,
   unsettleThread,
   unsnoozeThread,
@@ -72,6 +77,7 @@ export type {
   DeleteThreadInput,
   InterruptThreadTurnInput,
   LinkThreadPullRequestInput,
+  LinkThreadSlackThreadInput,
   RespondToThreadApprovalInput,
   RespondToThreadUserInputInput,
   DismissThreadUserInputInput,
@@ -87,6 +93,7 @@ export type {
   StopThreadSessionInput,
   UnarchiveThreadInput,
   UnlinkThreadPullRequestInput,
+  UnlinkThreadSlackThreadInput,
   UnpinThreadInput,
   UnsettleThreadInput,
   UnsnoozeThreadInput,
@@ -194,6 +201,18 @@ export function createThreadEnvironmentAtoms<R, E>(
       scheduler,
       concurrency,
     }),
+    linkSlackThread: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:link-slack-thread",
+      execute: (input: LinkThreadSlackThreadInput) => linkThreadSlackThread(input),
+      scheduler,
+      concurrency,
+    }),
+    unlinkSlackThread: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:unlink-slack-thread",
+      execute: (input: UnlinkThreadSlackThreadInput) => unlinkThreadSlackThread(input),
+      scheduler,
+      concurrency,
+    }),
     setRuntimeMode: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:set-runtime-mode",
       execute: (input: SetThreadRuntimeModeInput) => setThreadRuntimeMode(input),
@@ -258,6 +277,12 @@ export function createThreadEnvironmentAtoms<R, E>(
   const optimistic = createOptimisticThreadLifecycle(snapshotAtom);
   return {
     ...commands,
+    /** A linked Slack thread's messages, read through the environment's Slack token. */
+    slackThread: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:thread:slack-thread",
+      tag: WS_METHODS.slackThreadRead,
+      staleTimeMs: 60_000,
+    }),
     snapshotAtom: optimistic.snapshotAtom,
     settle: optimistic.wrap(commands.settle, (thread, _input, now, accepted) =>
       !accepted &&

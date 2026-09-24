@@ -140,15 +140,17 @@ function providerEnvironmentSecretName(input: {
 }
 
 /**
- * On disk the hub key is replaced by this marker and the real value lives in
- * the secret store, mirroring provider environment secrets. A client that
- * sends the marker back means "keep what you have".
+ * On disk the hub key and the Slack token are replaced by this marker and the
+ * real value lives in the secret store, mirroring provider environment secrets.
+ * A client that sends the marker back means "keep what you have".
  */
 const USAGE_LIMIT_SOURCE_KEY_REDACTED = "\u2022\u2022\u2022\u2022\u2022\u2022";
 
 function usageLimitSourceSecretName(sourceId: string): string {
   return `usage-limit-source-${Buffer.from(sourceId, "utf8").toString("base64url")}`;
 }
+
+const SLACK_TOKEN_SECRET_NAME = "slack-token";
 
 function redactProviderEnvironmentVariable(
   variable: ProviderInstanceEnvironmentVariable,
@@ -186,7 +188,10 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
       },
     ]),
   );
-  return { ...settings, providerInstances, usageLimitSources };
+  const slack = {
+    token: settings.slack.token.length > 0 ? USAGE_LIMIT_SOURCE_KEY_REDACTED : "",
+  };
+  return { ...settings, providerInstances, usageLimitSources, slack };
 }
 
 export class ServerSettingsService extends Context.Service<
@@ -709,10 +714,22 @@ const make = Effect.gen(function* () {
           managementKey: Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
         };
       }
+      let slack = settings.slack;
+      if (slack.token === USAGE_LIMIT_SOURCE_KEY_REDACTED) {
+        const secret = yield* secretStore
+          .get(SLACK_TOKEN_SECRET_NAME)
+          .pipe(
+            Effect.mapError(
+              (cause) => new ServerSettingsError({ settingsPath, operation: "read-secret", cause }),
+            ),
+          );
+        slack = { token: Option.isSome(secret) ? textDecoder.decode(secret.value) : "" };
+      }
       return {
         ...settings,
         providerInstances: providerInstances as ServerSettings["providerInstances"],
         usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
+        slack,
       };
     });
 
@@ -854,11 +871,27 @@ const make = Effect.gen(function* () {
         });
       }
 
+      const slackToken = next.slack.token;
+      if (slackToken.length > 0 && slackToken !== USAGE_LIMIT_SOURCE_KEY_REDACTED) {
+        changes.push({
+          kind: "write",
+          secretName: SLACK_TOKEN_SECRET_NAME,
+          value: textEncoder.encode(slackToken),
+        });
+      } else if (slackToken.length === 0 && current.slack.token.length > 0) {
+        changes.push({
+          kind: "remove",
+          secretName: SLACK_TOKEN_SECRET_NAME,
+          operation: "remove-secret",
+        });
+      }
+
       return {
         settings: {
           ...next,
           providerInstances: providerInstances as ServerSettings["providerInstances"],
           usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
+          slack: { token: slackToken.length > 0 ? USAGE_LIMIT_SOURCE_KEY_REDACTED : "" },
         },
         changes,
       };

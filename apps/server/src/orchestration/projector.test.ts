@@ -87,6 +87,7 @@ describe("orchestration projector", () => {
         branch: null,
         worktreePath: null,
         pullRequests: [],
+        slackThreads: [],
         branchPullRequest: null,
         latestTurn: null,
         createdAt: now,
