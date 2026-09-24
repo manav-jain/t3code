@@ -2541,6 +2541,8 @@ export default function Sidebar() {
     readonly assignedKeys: ReadonlyMap<string, string>;
     /** Destination group when the drop regroups the thread (null: none). */
     readonly groupName?: string | null;
+    /** The thread's group before the drop, to recognize a concurrent regroup. */
+    readonly sourceGroupName?: string | null;
   } | null>(null);
   const {
     pinnedThreads,
@@ -3327,11 +3329,18 @@ export default function Sidebar() {
     }
     if (canonicalSection !== optimisticDrop.section) return;
     if (optimisticDrop.clearsSnooze && thread.snoozedUntil != null) return;
-    if (
-      optimisticDrop.groupName !== undefined &&
-      (thread.groupName ?? null) !== optimisticDrop.groupName
-    )
-      return;
+    if (optimisticDrop.groupName !== undefined) {
+      const canonicalGroup = thread.groupName ?? null;
+      // Regrouped elsewhere meanwhile (menu, rename, another device): the drop no longer applies.
+      if (
+        canonicalGroup !== optimisticDrop.groupName &&
+        canonicalGroup !== optimisticDrop.sourceGroupName
+      ) {
+        setOptimisticDrop(null);
+        return;
+      }
+      if (canonicalGroup !== optimisticDrop.groupName) return;
+    }
     const destinationKeys = optimisticDrop.section === "pinned" ? pinnedKeys : activeKeys;
     const canonicalDestination = destinationKeys.flatMap((key) => {
       const canonical = canonicalByKey.get(key);
@@ -3697,7 +3706,7 @@ export default function Sidebar() {
         keysAtDrop: target.section === "active" ? activeKeysById : pinnedKeysById,
         assignedKeys: new Map(assignments.map(({ id, orderKey }) => [id, orderKey])),
         ...(plan.kind === "move-active" && plan.groupName !== undefined
-          ? { groupName: plan.groupName }
+          ? { groupName: plan.groupName, sourceGroupName: activeThread.groupName ?? null }
           : {}),
       };
       setOptimisticDrop(drop);
@@ -3888,6 +3897,12 @@ export default function Sidebar() {
 
   const attemptSetThreadGroup = useCallback(
     (threadRefs: readonly ScopedThreadRef[], groupName: string | null) => {
+      // A collapsed name can outlive its group; moving threads into it must not hide them.
+      if (groupName !== null) {
+        setCollapsedGroupNames((names) =>
+          names.includes(groupName) ? names.filter((name) => name !== groupName) : names,
+        );
+      }
       void (async () => {
         const results = await Promise.all(
           threadRefs.map((threadRef) => setThreadGroup(threadRef, groupName)),
@@ -3906,7 +3921,7 @@ export default function Sidebar() {
         }
       })();
     },
-    [setThreadGroup],
+    [setCollapsedGroupNames, setThreadGroup],
   );
   // Rename and Ungroup act on every loaded thread carrying the name, in any
   // section or environment: the group is nothing more than that name.
