@@ -28,13 +28,13 @@ describe("storage cleanup settings", () => {
       worktreeOnMerge: false,
       worktreeOnDelete: false,
       worktreeUnchanged: false,
-      worktreeOnSettle: false,
+      worktreeSettledAfterDays: null,
       browserArtifactsAfterDays: null,
       logsAfterDays: null,
     });
   });
 
-  it("keeps the settle rule off for custom rules saved before it existed", () => {
+  it("keeps the settled rule off for custom rules saved before it existed", () => {
     expect(
       decodeServerSettings({
         worktreeCleanup: {
@@ -54,7 +54,7 @@ describe("storage cleanup settings", () => {
         worktreeOnMerge: false,
         worktreeOnDelete: true,
         worktreeUnchanged: false,
-        worktreeOnSettle: false,
+        worktreeSettledAfterDays: null,
       },
     });
   });

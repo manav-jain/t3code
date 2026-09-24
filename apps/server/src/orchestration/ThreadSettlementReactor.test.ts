@@ -1462,7 +1462,7 @@ describe("storage cleanup", () => {
     "diverged",
     "head-moved",
     "settled",
-    "settled-event",
+    "settled-recent",
     "settled-dirty",
     "settled-active",
     "deleted",
@@ -1550,8 +1550,12 @@ describe("storage cleanup", () => {
           const deleteRule = protection.startsWith("deleted");
           let tombstoned = deleteRule && protection !== "deleted-event";
           const settleRule = protection.startsWith("settled");
-          let settled =
-            settleRule && protection !== "settled-event" && protection !== "settled-active";
+          const settled = settleRule && protection !== "settled-active";
+          // The settle rule below is 8 days; NOW is 2026-08-28.
+          const settledAt =
+            protection === "settled-recent"
+              ? "2026-08-26T00:00:00.000Z"
+              : "2026-08-01T00:00:00.000Z";
           const removals: string[] = [];
           const mergeRule = protection === "merged" || protection === "unmerged";
           const unchangedRule =
@@ -1594,7 +1598,7 @@ describe("storage cleanup", () => {
                       ? null
                       : 8,
                   worktreeOnDelete: deleteRule && protection !== "deleted-project-custom",
-                  worktreeOnSettle: settleRule,
+                  worktreeSettledAfterDays: settleRule ? 8 : null,
                   worktreeOnMerge: mergeRule,
                   worktreeUnchanged: unchangedRule,
                   browserArtifactsAfterDays: 8,
@@ -1665,7 +1669,7 @@ describe("storage cleanup", () => {
                             ? []
                             : [
                                 settled
-                                  ? { ...thread, settledOverride: "settled" as const }
+                                  ? { ...thread, settledOverride: "settled" as const, settledAt }
                                   : thread,
                               ];
                           if (protection === "deleted-shared")
@@ -1905,24 +1909,6 @@ describe("storage cleanup", () => {
             yield* Deferred.succeed(deletionStopped, undefined);
             yield* cleanup.drain;
           }
-          if (protection === "settled-event") {
-            assert.strictEqual(yield* fs.exists(worktreePath), true);
-            settled = true;
-            yield* PubSub.publish(domainEvents, {
-              type: "thread.settled",
-              sequence: 2,
-              eventId: EventId.make("storage-thread-settled"),
-              aggregateKind: "thread",
-              aggregateId: thread.id,
-              occurredAt: NOW,
-              commandId: null,
-              causationEventId: null,
-              correlationId: null,
-              metadata: {},
-              payload: { threadId: thread.id, settledAt: NOW, updatedAt: NOW },
-            });
-            yield* cleanup.drain;
-          }
           const removed =
             protection === "project-custom" ||
             protection === "deleted-project-custom" ||
@@ -1931,7 +1917,6 @@ describe("storage cleanup", () => {
             protection === "deleted-event" ||
             protection === "deleted-owner" ||
             protection === "settled" ||
-            protection === "settled-event" ||
             protection === "files-disabled" ||
             protection === "files-extended" ||
             protection === "merged" ||
