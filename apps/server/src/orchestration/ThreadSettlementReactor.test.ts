@@ -1461,6 +1461,10 @@ describe("storage cleanup", () => {
     "unchanged-two-worktrees",
     "diverged",
     "head-moved",
+    "settled",
+    "settled-recent",
+    "settled-dirty",
+    "settled-active",
     "deleted",
     "deleted-event",
     "deleted-dirty",
@@ -1545,6 +1549,13 @@ describe("storage cleanup", () => {
           const domainEvents = yield* PubSub.unbounded<OrchestrationEvent>();
           const deleteRule = protection.startsWith("deleted");
           let tombstoned = deleteRule && protection !== "deleted-event";
+          const settleRule = protection.startsWith("settled");
+          const settled = settleRule && protection !== "settled-active";
+          // The settle rule below is 8 days; NOW is 2026-08-28.
+          const settledAt =
+            protection === "settled-recent"
+              ? "2026-08-26T00:00:00.000Z"
+              : "2026-08-01T00:00:00.000Z";
           const removals: string[] = [];
           const mergeRule = protection === "merged" || protection === "unmerged";
           const unchangedRule =
@@ -1579,10 +1590,15 @@ describe("storage cleanup", () => {
                 },
                 storageCleanup: {
                   worktreeAfterDays:
-                    deleteRule || mergeRule || unchangedRule || protection === "project-custom"
+                    deleteRule ||
+                    settleRule ||
+                    mergeRule ||
+                    unchangedRule ||
+                    protection === "project-custom"
                       ? null
                       : 8,
                   worktreeOnDelete: deleteRule && protection !== "deleted-project-custom",
+                  worktreeSettledAfterDays: settleRule ? 8 : null,
                   worktreeOnMerge: mergeRule,
                   worktreeUnchanged: unchangedRule,
                   browserArtifactsAfterDays: 8,
@@ -1649,7 +1665,13 @@ describe("storage cleanup", () => {
                             protection === "deleted-project-custom"
                               ? []
                               : [makeProject(PROJECT_ID, config.baseDir)];
-                          const threads = tombstoned ? [] : [thread];
+                          const threads = tombstoned
+                            ? []
+                            : [
+                                settled
+                                  ? { ...thread, settledOverride: "settled" as const, settledAt }
+                                  : thread,
+                              ];
                           if (protection === "deleted-shared")
                             threads.push({ ...thread, id: ThreadId.make("surviving-thread") });
                           if (protection === "deleted-project")
@@ -1771,7 +1793,9 @@ describe("storage cleanup", () => {
                       branch: cwd === secondWorktreePath ? "feature-two" : "feature",
                       upstreamRef: null,
                       hasWorkingTreeChanges:
-                        protection === "dirty" || protection === "deleted-dirty",
+                        protection === "dirty" ||
+                        protection === "deleted-dirty" ||
+                        protection === "settled-dirty",
                       workingTree: { files: [], insertions: 0, deletions: 0 },
                       hasUpstream: false,
                       aheadCount: 0,
@@ -1892,6 +1916,7 @@ describe("storage cleanup", () => {
             protection === "deleted" ||
             protection === "deleted-event" ||
             protection === "deleted-owner" ||
+            protection === "settled" ||
             protection === "files-disabled" ||
             protection === "files-extended" ||
             protection === "merged" ||

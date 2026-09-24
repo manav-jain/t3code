@@ -28,8 +28,34 @@ describe("storage cleanup settings", () => {
       worktreeOnMerge: false,
       worktreeOnDelete: false,
       worktreeUnchanged: false,
+      worktreeSettledAfterDays: null,
       browserArtifactsAfterDays: null,
       logsAfterDays: null,
+    });
+  });
+
+  it("keeps the settled rule off for custom rules saved before it existed", () => {
+    expect(
+      decodeServerSettings({
+        worktreeCleanup: {
+          mode: "custom",
+          rules: {
+            worktreeAfterDays: null,
+            worktreeOnMerge: false,
+            worktreeOnDelete: true,
+            worktreeUnchanged: false,
+          },
+        },
+      }).worktreeCleanup,
+    ).toEqual({
+      mode: "custom",
+      rules: {
+        worktreeAfterDays: null,
+        worktreeOnMerge: false,
+        worktreeOnDelete: true,
+        worktreeUnchanged: false,
+        worktreeSettledAfterDays: null,
+      },
     });
   });
 

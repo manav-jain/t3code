@@ -987,6 +987,9 @@ export const WorktreeCleanupRules = Schema.Struct({
   worktreeOnMerge: Schema.Boolean,
   worktreeOnDelete: Schema.Boolean,
   worktreeUnchanged: Schema.Boolean,
+  worktreeSettledAfterDays: StorageRetentionDays.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
 });
 export type WorktreeCleanupRules = typeof WorktreeCleanupRules.Type;
 
@@ -1072,6 +1075,9 @@ export const StorageCleanupSettings = Schema.Struct({
   worktreeOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   worktreeOnDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   worktreeUnchanged: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  worktreeSettledAfterDays: StorageRetentionDays.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   browserArtifactsAfterDays: StorageRetentionDays.pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -1449,6 +1455,7 @@ export const ServerSettingsPatch = Schema.Struct({
             worktreeOnMerge: Schema.optionalKey(Schema.Boolean),
             worktreeOnDelete: Schema.optionalKey(Schema.Boolean),
             worktreeUnchanged: Schema.optionalKey(Schema.Boolean),
+            worktreeSettledAfterDays: Schema.optionalKey(StorageRetentionDays),
           }),
         }),
       ]),
@@ -1460,6 +1467,7 @@ export const ServerSettingsPatch = Schema.Struct({
       worktreeOnMerge: Schema.optionalKey(Schema.Boolean),
       worktreeOnDelete: Schema.optionalKey(Schema.Boolean),
       worktreeUnchanged: Schema.optionalKey(Schema.Boolean),
+      worktreeSettledAfterDays: Schema.optionalKey(StorageRetentionDays),
       browserArtifactsAfterDays: Schema.optionalKey(StorageRetentionDays),
       logsAfterDays: Schema.optionalKey(StorageRetentionDays),
     }),

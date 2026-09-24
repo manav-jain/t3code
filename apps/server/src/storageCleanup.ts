@@ -50,7 +50,8 @@ const worktreeCleanupEnabled = (rules: WorktreeCleanupRules) =>
   rules.worktreeAfterDays !== null ||
   rules.worktreeOnMerge ||
   rules.worktreeOnDelete ||
-  rules.worktreeUnchanged;
+  rules.worktreeUnchanged ||
+  rules.worktreeSettledAfterDays !== null;
 
 function anyWorktreePolicy(
   settings: ServerSettings,
@@ -204,6 +205,21 @@ export const make = Effect.gen(function* () {
       if (!worktreeCleanupEnabled(settings)) continue;
       const worktreePath = path.resolve(thread.worktreePath!);
       const deleted = "deletedAt" in thread;
+      const settled =
+        !deleted &&
+        settings.worktreeSettledAfterDays !== null &&
+        thread.settledOverride === "settled" &&
+        thread.settledAt != null &&
+        Date.parse(thread.settledAt) < now - settings.worktreeSettledAfterDays * DAY_MS;
+      // Settled age is decided without Git; skip the Git checks when no other rule can apply.
+      if (
+        !deleted &&
+        !settled &&
+        settings.worktreeAfterDays === null &&
+        !settings.worktreeUnchanged &&
+        !settings.worktreeOnMerge
+      )
+        continue;
       const project = deleted
         ? { workspaceRoot: thread.workspaceRoot }
         : snapshot.projects.find((entry) => entry.id === thread.projectId);
@@ -242,7 +258,7 @@ export const make = Effect.gen(function* () {
           !deleted &&
           settings.worktreeAfterDays !== null &&
           storageCleanupActivityAt(thread) < now - settings.worktreeAfterDays * DAY_MS;
-        let eligible = deleted || old;
+        let eligible = deleted || old || settled;
         if (!eligible && (settings.worktreeUnchanged || settings.worktreeOnMerge)) {
           const repositoryCwd = path.resolve(project.workspaceRoot);
           const remote = yield* git.resolvePrimaryRemoteName(repositoryCwd);
@@ -312,6 +328,7 @@ export const make = Effect.gen(function* () {
         } else if (
           latest.length !== 1 ||
           latest[0]!.id !== thread.id ||
+          latest[0]!.settledOverride !== thread.settledOverride ||
           !storageCleanupThreadIdle(latest[0]!, now) ||
           storageCleanupActivityAt(latest[0]!) !== storageCleanupActivityAt(thread)
         )
