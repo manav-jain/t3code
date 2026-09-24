@@ -13,6 +13,7 @@ import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 
+import { sidebarGroupComparator } from "../components/Sidebar.logic";
 import { resolveSnoozePresets } from "../components/Sidebar.snooze";
 import {
   buildThreadActionMenuItems,
@@ -156,7 +157,11 @@ export function useThreadActionMenu(input: {
           canSnoozeNow: canSnooze(thread, { now: now.toISOString() }),
           isRegeneratingTitle,
           groupName: thread.groupName ?? null,
-          groupNames: supports.groups ? listThreadGroupNames(readThreadShells()) : [],
+          groupNames: supports.groups
+            ? listThreadGroupNames(readThreadShells()).sort(
+                sidebarGroupComparator(useUiStateStore.getState().groupOrder),
+              )
+            : [],
           isRunning: thread.session?.status === "running" && thread.session.activeTurnId != null,
           supports,
           snoozePresets,

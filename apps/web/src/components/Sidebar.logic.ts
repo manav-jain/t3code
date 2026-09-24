@@ -9,7 +9,10 @@ import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-searc
 import type { ContextMenuItem, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import type { AsyncResult } from "effect/unstable/reactivity";
-import { planPinnedReorder } from "@t3tools/client-runtime/state/thread-sort";
+import {
+  compareThreadGroupNames,
+  planPinnedReorder,
+} from "@t3tools/client-runtime/state/thread-sort";
 import {
   effectiveSnoozed,
   type ThreadSnoozeShell,
@@ -145,6 +148,59 @@ export function sidebarGroupMarker(name: string): SidebarListMarker {
 /** The group a marker heads, or null for structural markers. */
 export function sidebarMarkerGroup(marker: SidebarListMarker): string | null {
   return marker.startsWith("group:") ? marker.slice("group:".length) : null;
+}
+
+const SIDEBAR_GROUP_ID_PREFIX = sidebarMarkerId("group:");
+
+/** The group whose header has this sortable id; null for rows and other markers. */
+export function sidebarGroupAtId(id: string): string | null {
+  return id.startsWith(SIDEBAR_GROUP_ID_PREFIX) ? id.slice(SIDEBAR_GROUP_ID_PREFIX.length) : null;
+}
+
+/** Web group order: the device's manual `groupOrder` first, in that order,
+    then the remaining groups A-Z. Ungrouped (null) always leads, and names
+    in `groupOrder` that no group carries any more simply never match. */
+export function sidebarGroupComparator(
+  groupOrder: readonly string[],
+): (left: string | null, right: string | null) => number {
+  const rank = new Map(groupOrder.map((name, index) => [name, index] as const));
+  const rankOf = (name: string | null) =>
+    name === null ? -1 : (rank.get(name) ?? groupOrder.length);
+  return (left, right) => rankOf(left) - rankOf(right) || compareThreadGroupNames(left, right);
+}
+
+/** The manual group order after dropping the header `activeId` on `overId`.
+    Mirrors the sortable's arrayMove: moved up, a group lands before the one
+    it is over; moved down, after it. `groupNames` is every current group in
+    display order, so groups a filter hides keep their slots and names no
+    longer in use drop out. Null for thread drags and drops that move nothing. */
+export function planSidebarGroupDrop(input: {
+  readonly activeId: string;
+  readonly overId: string | null;
+  readonly groupNames: readonly string[];
+}): string[] | null {
+  const dragged = sidebarGroupAtId(input.activeId);
+  const over = input.overId === null ? null : sidebarGroupAtId(input.overId);
+  if (dragged === null || over === null || dragged === over) return null;
+  const from = input.groupNames.indexOf(dragged);
+  const to = input.groupNames.indexOf(over);
+  if (from === -1 || to === -1) return null;
+  const next = input.groupNames.filter((name) => name !== dragged);
+  next.splice(next.indexOf(over) + (from < to ? 1 : 0), 0, dragged);
+  return next;
+}
+
+/** `groupOrder` after renaming a group (null: ungrouping it). The new name
+    takes the old one's slot unless it already has its own, as when merging. */
+export function renameInSidebarGroupOrder(
+  groupOrder: readonly string[],
+  name: string,
+  nextName: string | null,
+): string[] {
+  if (nextName === null || groupOrder.includes(nextName)) {
+    return groupOrder.filter((entry) => entry !== name);
+  }
+  return groupOrder.map((entry) => (entry === name ? nextName : entry));
 }
 
 export type SidebarListItem =
