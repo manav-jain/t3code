@@ -13,6 +13,7 @@ import type { ChatAttachment } from "@t3tools/contracts";
 
 import { limitSection } from "./TextGenerationUtils.ts";
 import type { TextGenerationPolicy } from "./TextGenerationPolicy.ts";
+import type { StandupSummaryThread } from "./TextGeneration.ts";
 
 const EARLIER_CONTENT_TRUNCATION_MARKER = "[Earlier content truncated]\n\n";
 
@@ -326,4 +327,50 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
   });
 
   return { prompt, outputSchema };
+}
+
+export interface StandupSummaryPromptInput {
+  threads: ReadonlyArray<StandupSummaryThread>;
+}
+
+/**
+ * Length rules modeled on an oncall brevity directive: lead with the outcome,
+ * cut narration, use tight bullets. Its short-reply cap is deliberately dropped,
+ * because a standup that leaves threads out is wrong, not brief.
+ */
+const STANDUP_LENGTH_DIRECTIVE = `## Length
+- Cover EVERY thread listed below. Never drop a thread or fold it into another to save space. Length follows the work, not a word cap.
+- Lead each bullet with the outcome: what got done, what is stuck and on what, or what the reader owes next.
+- Cut: restating the user's request, narrating how the agent worked, per-tool play-by-play, unasked-for caveats, and a closing summary.
+- Use tight bullets, not prose. Add a sub-bullet only for a blocker, a decision the reader must make, or a concrete follow-up.`;
+
+const STANDUP_BUCKET_LABELS = { closed: "closed", halted: "halted", started: "started" } as const;
+
+export function buildStandupSummaryPrompt(input: StandupSummaryPromptInput) {
+  const threads = input.threads.map((thread) =>
+    [
+      `### ${thread.title}`,
+      ...(thread.projectTitle ? [`Project: ${thread.projectTitle}`] : []),
+      `Today: ${thread.buckets.map((bucket) => STANDUP_BUCKET_LABELS[bucket]).join(", ")}`,
+      ...(thread.note ? [`Halted because: ${thread.note}`] : []),
+      thread.context || "(no messages)",
+    ].join("\n"),
+  );
+  const prompt = `You write the user's daily standup from the T3 Code threads they worked in today.
+Return a JSON object with key summary: GitHub-flavored markdown.
+
+Rules:
+- Use the headings "## Closed", "## Halted", and "## Started", in that order. Skip a heading with no threads.
+- A thread in several groups appears once, under the first heading that applies. Mention when a closed or halted thread was also started today.
+- Start each bullet with the thread title in bold.
+- For halted threads, say what stopped them and what would unblock them.
+- State only what the thread contents support. Say it is unclear rather than guess, and never claim work shipped unless the thread shows it.
+- Do not invent links, ids, or numbers.
+
+${STANDUP_LENGTH_DIRECTIVE}
+
+Threads:
+
+${threads.join("\n\n")}`;
+  return { prompt, outputSchema: Schema.Struct({ summary: Schema.String }) };
 }

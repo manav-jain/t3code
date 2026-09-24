@@ -17,6 +17,7 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildStandupSummaryPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
@@ -54,7 +55,8 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateStandupSummary";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -263,10 +265,23 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateStandupSummary: TextGeneration.TextGeneration["Service"]["generateStandupSummary"] =
+    Effect.fn("GrokTextGeneration.generateStandupSummary")(function* (input) {
+      const { prompt, outputSchema } = buildStandupSummaryPrompt(input);
+      return yield* runGrokJson({
+        operation: "generateStandupSummary",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateStandupSummary,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

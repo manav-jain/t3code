@@ -25,6 +25,7 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildStandupSummaryPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
@@ -405,10 +406,20 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       };
     });
 
+  const generateStandupSummary: TextGeneration.TextGeneration["Service"]["generateStandupSummary"] =
+    Effect.fn("AntigravityTextGeneration.generateStandupSummary")(function* (input) {
+      return yield* runAntigravityJson({
+        operation: "generateStandupSummary",
+        ...buildStandupSummaryPrompt(input),
+        modelSelection: input.modelSelection,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateStandupSummary,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

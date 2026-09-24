@@ -143,3 +143,19 @@ Choose **Snooze → Custom…** from a thread's menu to pick a date and time in 
 local time zone, or a duration in minutes, hours, or days. Durations start when
 you confirm; one day means 24 hours. On web and desktop, you can also snooze
 several selected threads together. Choose **Wake thread** to bring a thread back early.
+
+## Review today's work
+
+On web and desktop, choose **Standup** at the bottom of the sidebar, or search for it in the
+command palette, to see today's threads across your connected environments:
+
+- **Started**: created today.
+- **Closed**: settled today, or a linked pull request merged today. Threads settled
+  automatically for inactivity count on the day of their last activity, not today.
+- **Halted**: an active thread whose latest turn stopped, failed, or is waiting for your
+  approval or answer today.
+
+Above the lists, each environment writes a summary with your **Text generation** model from
+Settings. The summary is written the first time you open Standup each day. The lists keep
+updating after that; when they no longer match the summary, choose refresh to rewrite it.
+Environments running an older server show the lists without a summary.
