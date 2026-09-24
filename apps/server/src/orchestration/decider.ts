@@ -21,6 +21,7 @@ import {
   threadPullRequestKeysEqual,
 } from "@t3tools/shared/threadPullRequests";
 import { compareDateTimeStrings } from "@t3tools/shared/dateTime";
+import { findSlackThreadLinks, slackThreadKeysEqual } from "@t3tools/shared/slackThreadUrl";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -169,6 +170,33 @@ function withEventBase(
 }
 
 type PlannedOrchestrationEvent = Omit<OrchestrationEvent, "sequence">;
+
+/** A user's message links the Slack threads it mentions, as if the user linked them. */
+const linkMentionedSlackThreads = Effect.fnUntraced(function* (
+  thread: Pick<OrchestrationThread, "id" | "slackThreads">,
+  text: string,
+  input: Pick<OrchestrationCommand, "commandId"> & { readonly occurredAt: string },
+) {
+  const events: PlannedOrchestrationEvent[] = [];
+  for (const link of findSlackThreadLinks(text)) {
+    if ((thread.slackThreads ?? []).some((linked) => slackThreadKeysEqual(linked, link))) continue;
+    events.push({
+      ...(yield* withEventBase({
+        aggregateKind: "thread",
+        aggregateId: thread.id,
+        occurredAt: input.occurredAt,
+        commandId: input.commandId,
+      })),
+      type: "thread.slack-thread-linked",
+      payload: {
+        threadId: thread.id,
+        link: { ...link, source: "manual", linkedAt: input.occurredAt },
+        updatedAt: input.occurredAt,
+      },
+    });
+  }
+  return events;
+});
 
 type DecideOrchestrationCommandResult =
   | PlannedOrchestrationEvent
@@ -1134,6 +1162,71 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.slack-thread.link": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if ((thread.slackThreads ?? []).some((link) => slackThreadKeysEqual(link, command))) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Slack thread ${command.channelId}/${command.threadTs} is already linked to thread ${command.threadId}`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.slack-thread-linked",
+        payload: {
+          threadId: command.threadId,
+          link: {
+            channelId: command.channelId,
+            threadTs: command.threadTs,
+            url: command.url,
+            source: command.source,
+            linkedAt: occurredAt,
+          },
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.slack-thread.unlink": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (!(thread.slackThreads ?? []).some((link) => slackThreadKeysEqual(link, command))) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Slack thread ${command.channelId}/${command.threadTs} is not linked to thread ${command.threadId}`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.slack-thread-unlinked",
+        payload: {
+          threadId: command.threadId,
+          channelId: command.channelId,
+          threadTs: command.threadTs,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
     case "thread.pull-request-link.sync": {
       const thread = yield* requireThread({
         readModel,
@@ -1497,6 +1590,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       return [
         ...lifecycleResetEvents,
         ...(userMessageEvent ? [userMessageEvent] : []),
+        ...(userMessageEvent
+          ? yield* linkMentionedSlackThreads(targetThread, command.message.text, {
+              commandId: command.commandId,
+              occurredAt: command.createdAt,
+            })
+          : []),
         turnStartRequestedEvent,
       ];
     }
@@ -1519,7 +1618,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Message '${command.message.messageId}' already exists on thread '${command.threadId}'.`,
         });
       }
-      return {
+      const userMessageEvent: PlannedOrchestrationEvent = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -1541,6 +1640,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: command.createdAt,
         },
       };
+      return [
+        userMessageEvent,
+        ...(yield* linkMentionedSlackThreads(thread, command.message.text, {
+          commandId: command.commandId,
+          occurredAt: command.createdAt,
+        })),
+      ];
     }
 
     case "thread.turn.interrupt": {

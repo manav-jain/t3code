@@ -203,6 +203,10 @@
       "types": "./src/threadPullRequests.ts",
       "import": "./src/threadPullRequests.ts"
     },
+    "./slackThreadUrl": {
+      "types": "./src/slackThreadUrl.ts",
+      "import": "./src/slackThreadUrl.ts"
+    },
     "./changeRequestUrl": {
       "types": "./src/changeRequestUrl.ts",
       "import": "./src/changeRequestUrl.ts"

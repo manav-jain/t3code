@@ -1,4 +1,5 @@
 import { usePullRequestLinking } from "~/hooks/usePullRequestLinking";
+import { useSlackThreadLinking } from "~/hooks/useSlackThreadLinking";
 import { useAtomValue } from "@effect/atom-react";
 import {
   COMPOSER_CONTEXT_CLIPBOARD_MIME,
@@ -2271,6 +2272,7 @@ function useChatMarkdownState({
     reportFailure: false,
   });
   const pullRequestLinking = usePullRequestLinking(threadRef?.environmentId);
+  const slackThreadLinking = useSlackThreadLinking(threadRef);
   const environmentId = threadRef?.environmentId ?? explicitEnvironmentId ?? null;
   const remoteOpen = useRemoteOpenResolution(environmentId);
   const canUseShellActions = canUseMarkdownFileShellActions(
@@ -2662,6 +2664,7 @@ function useChatMarkdownState({
       text,
       threadRef,
       updateThreadPullRequestLink,
+      slackThreadLinking,
     }),
     [
       cwd,
@@ -2692,6 +2695,7 @@ function useChatMarkdownState({
       text,
       threadRef,
       updateThreadPullRequestLink,
+      slackThreadLinking,
     ],
   );
   return {
@@ -2832,6 +2836,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       resolveThreadPullRequest,
       serverConfig,
       updateThreadPullRequestLink,
+      slackThreadLinking,
       fileLinkChip,
       renderContextReference,
     } = use(ChatMarkdownRendererContext);
@@ -2956,12 +2961,15 @@ const CHAT_MARKDOWN_COMPONENTS = {
             event.stopPropagation();
             const api = readLocalApi();
             if (!api) return;
+            const slackLinkAction = slackThreadLinking.actionFor(href);
             const threadLinkAction =
-              linkedThreadPullRequestFor(href) !== null
+              slackLinkAction ??
+              (linkedThreadPullRequestFor(href) !== null
                 ? "unlink-from-thread"
                 : resolveThreadPullRequest(href) === null
                   ? undefined
-                  : "link-to-thread";
+                  : "link-to-thread");
+            const linkSubject = slackLinkAction === undefined ? "pull request" : "Slack thread";
             void showExternalLinkContextMenu({
               href,
               canOpenInPreview,
@@ -2979,7 +2987,10 @@ const CHAT_MARKDOWN_COMPONENTS = {
               },
               openExternal: (target) => api.shell.openExternal(target),
               copyLink: (target) => writeTextToClipboard(target, "link"),
-              updateThreadLink: updateThreadPullRequestLink,
+              updateThreadLink:
+                slackLinkAction === undefined
+                  ? updateThreadPullRequestLink
+                  : slackThreadLinking.update,
               reportFailure: (operation, cause) => {
                 reportMarkdownActionFailure({ operation, target: href }, cause);
                 if (
@@ -2991,8 +3002,8 @@ const CHAT_MARKDOWN_COMPONENTS = {
                       type: "error",
                       title:
                         operation === "link-pull-request-to-thread"
-                          ? "Unable to link pull request"
-                          : "Unable to unlink pull request",
+                          ? `Unable to link ${linkSubject}`
+                          : `Unable to unlink ${linkSubject}`,
                       description: cause instanceof Error ? cause.message : "The request failed.",
                     }),
                   );

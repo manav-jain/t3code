@@ -896,6 +896,15 @@ export const UsageLimitSourceConfig = Schema.Struct({
 });
 export type UsageLimitSourceConfig = typeof UsageLimitSourceConfig.Type;
 
+/**
+ * The user token this environment reads linked Slack threads with. Like a hub's
+ * management key it lives in the secret store and reaches clients redacted.
+ */
+export const SlackSettings = Schema.Struct({
+  token: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+});
+export type SlackSettings = typeof SlackSettings.Type;
+
 export const ObservabilitySettings = Schema.Struct({
   otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   otlpMetricsUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
@@ -1283,6 +1292,7 @@ export const ServerSettings = Schema.Struct({
   usagePriceOverrides: Schema.Record(TrimmedNonEmptyString, UsageModelPriceOverride).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  slack: SlackSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -1556,6 +1566,8 @@ export const ServerSettingsPatch = Schema.Struct({
   usagePriceOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(UsageModelPriceOverride)),
   ),
+  /** An empty token removes the stored one; the redacted marker keeps it. */
+  slack: Schema.optionalKey(Schema.Struct({ token: Schema.optionalKey(TrimmedString) })),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 

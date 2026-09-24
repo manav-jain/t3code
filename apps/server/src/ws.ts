@@ -41,6 +41,8 @@ import {
   type OrchestrationEvent,
   type OrchestrationShellStreamEvent,
   type OrchestrationShellStreamItem,
+  type OrchestrationThreadShell,
+  SlackThreadReadError,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
   OrchestrationSearchThreadsError,
@@ -82,6 +84,7 @@ import {
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { slackThreadKeysEqual } from "@t3tools/shared/slackThreadUrl";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
@@ -157,6 +160,7 @@ import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as SlackThreads from "./slack/SlackThreads.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
@@ -669,6 +673,7 @@ const makeWsRpcLayer = (
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const usage = yield* UsageService.UsageService;
+      const slackThreads = yield* SlackThreads.SlackThreads;
       const relayClient = yield* RelayClient.RelayClient;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
@@ -2786,6 +2791,22 @@ const makeWsRpcLayer = (
               "rpc.aggregate": "pull-requests",
             },
           ),
+        [WS_METHODS.slackThreadRead]: ({ threadId, ...key }) =>
+          observeRpcEffect(
+            WS_METHODS.slackThreadRead,
+            // The token can read far more than any client may, so read-only
+            // devices are limited to threads already linked to a T3 thread.
+            projectionSnapshotQuery.getThreadShellById(threadId).pipe(
+              Effect.orElseSucceed(() => Option.none<OrchestrationThreadShell>()),
+              Effect.flatMap((thread) =>
+                Option.isSome(thread) &&
+                (thread.value.slackThreads ?? []).some((link) => slackThreadKeysEqual(link, key))
+                  ? slackThreads.read(key)
+                  : Effect.fail(new SlackThreadReadError({ code: "not_linked" })),
+              ),
+            ),
+            { "rpc.aggregate": "slack" },
+          ),
         [WS_METHODS.pullRequestsLinkedThreads]: (input) =>
           observeRpcEffect(
             WS_METHODS.pullRequestsLinkedThreads,
@@ -3816,6 +3837,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         ),
     });
     const pullRequests = yield* PullRequestService.PullRequestService;
+    const slackThreads = yield* SlackThreads.SlackThreads;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
       "GET",
@@ -3864,6 +3886,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               // One server-lifetime service means clients share the same PR caches, and a WS
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
+              Layer.provide(Layer.succeed(SlackThreads.SlackThreads, slackThreads)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(
