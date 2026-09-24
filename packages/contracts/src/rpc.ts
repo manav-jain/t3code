@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
-import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   ProviderAuthCancelInput,
   ProviderAuthCompleteInput,
@@ -743,7 +743,8 @@ const WsPullRequestsStackRpc = Rpc.make(WS_METHODS.pullRequestsStack, {
 });
 
 const WsSlackThreadReadRpc = Rpc.make(WS_METHODS.slackThreadRead, {
-  payload: ThreadSlackThreadKey,
+  /** Only Slack threads linked to `threadId` can be read. */
+  payload: Schema.Struct({ threadId: ThreadId, ...ThreadSlackThreadKey.fields }),
   success: SlackThreadReadResult,
   error: Schema.Union([SlackThreadReadError, EnvironmentAuthorizationError]),
 });

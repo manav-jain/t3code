@@ -10118,6 +10118,46 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("slack.thread.read only reads Slack threads linked to the given thread", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-slack");
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getThreadShellById: (id) =>
+              Effect.succeed(
+                Option.some({
+                  ...makeDefaultOrchestrationThreadShell({ id }),
+                  slackThreads: [
+                    {
+                      url: "https://acme.slack.com/archives/C1/p1700000000000100",
+                      channelId: "C1",
+                      threadTs: "1700000000.000100",
+                      source: "manual" as const,
+                      linkedAt: "2026-01-01T00:00:00.000Z",
+                    },
+                  ],
+                }),
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const read = (channelId: string, threadTs: string) =>
+        Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.slackThreadRead]({ threadId, channelId, threadTs }).pipe(Effect.flip),
+          ),
+        );
+      const unlinked = yield* read("C2", "1700000000.000200");
+      assert.equal(unlinked._tag === "SlackThreadReadError" && unlinked.code, "not_linked");
+      // A linked key passes the guard and reaches the (unconfigured) Slack service.
+      const linked = yield* read("C1", "1700000000.000100");
+      assert.equal(linked._tag === "SlackThreadReadError" && linked.code, "not_configured");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("subscribeShell coalesces live bursts after the synchronization marker", () =>
     Effect.gen(function* () {
       const busyThreadId = ThreadId.make("thread-live-busy");
