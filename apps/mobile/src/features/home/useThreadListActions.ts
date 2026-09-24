@@ -1,4 +1,5 @@
 import type { ThreadMoveDestination } from "../threads/threadOrder";
+import { THREAD_GROUP_NAME_MAX_LENGTH } from "@t3tools/contracts";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import * as Cause from "effect/Cause";
@@ -564,7 +565,15 @@ export function useThreadListActions(): {
   const promptThreadGroup = useCallback(
     (thread: EnvironmentThreadShell) => {
       const commit = (name: string) => {
-        if (name.trim().length > 0) setThreadGroup(thread, name.trim());
+        const trimmed = name.trim();
+        if (trimmed.length > THREAD_GROUP_NAME_MAX_LENGTH) {
+          Alert.alert(
+            "Group name too long",
+            `Use at most ${THREAD_GROUP_NAME_MAX_LENGTH} characters.`,
+          );
+          return;
+        }
+        if (trimmed.length > 0) setThreadGroup(thread, trimmed);
       };
       if (Platform.OS === "ios") {
         Alert.prompt("New group", undefined, (name) => commit(name ?? ""), "plain-text");
