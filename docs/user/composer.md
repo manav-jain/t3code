@@ -114,6 +114,9 @@ restoring would erase their changes. A thread that works in the project director
 rewinds the conversation only. The selected prompt and its attachments return to the composer for editing and
 resending. Any unsent draft stays above the restored prompt.
 
+To undo a message you sent by mistake, use **Edit from here** on it while the
+agent is still working. T3 Code stops the turn first, then rewinds.
+
 This removes the selected message and later conversation from the active thread
 and provider history. It does not undo external actions or separate provider
 memory. The action is available only when the provider supports rewind.

@@ -193,3 +193,5 @@ export const ApprovalRequestId = makeEntityId("ApprovalRequestId");
 export type ApprovalRequestId = typeof ApprovalRequestId.Type;
 export const CheckpointRef = makeEntityId("CheckpointRef");
 export type CheckpointRef = typeof CheckpointRef.Type;
+/** Mid-turn diff placeholders carry this ref until the turn's real checkpoint is captured. */
+export const PLACEHOLDER_CHECKPOINT_REF_PREFIX = "provider-diff:";

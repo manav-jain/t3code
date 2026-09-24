@@ -2273,7 +2273,7 @@ function RevertUserMessageButton({
             type="button"
             size="xs"
             variant="ghost"
-            disabled={activity.isRevertingCheckpoint || activity.isWorking}
+            disabled={activity.isRevertingCheckpoint}
             onClick={() => ctx.onRevertToTurnCount(turnCount, messageId)}
             aria-label="Edit from here"
           />

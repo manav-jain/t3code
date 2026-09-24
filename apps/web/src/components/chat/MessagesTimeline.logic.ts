@@ -903,6 +903,8 @@ function attachTrailingToolGroupsToAssistant(
 function buildRevertTurnCountByUserMessageId(input: {
   supportsConversationRollback: boolean;
   timelineEntries: ReadonlyArray<TimelineEntry>;
+  latestTurnRunning: boolean;
+  turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   inferredCheckpointTurnCountByTurnId: Readonly<Record<string, number | undefined>>;
 }): Map<MessageId, number> {
@@ -935,6 +937,38 @@ function buildRevertTurnCountByUserMessageId(input: {
       break;
     }
   }
+
+  // The latest message can also rewind while its turn runs (ChatView stops it first), or after a
+  // stop that left no assistant message for its checkpoint to attach to. It rewinds to just past
+  // the previous user message's turn, once its own turn is running or checkpointed.
+  let latestIndex = -1;
+  let previousIndex = -1;
+  for (let index = entryCount - 1; index >= 0 && previousIndex < 0; index -= 1) {
+    const entry = input.timelineEntries[index];
+    if (entry?.kind !== "message" || entry.message.role !== "user") continue;
+    if (latestIndex < 0) latestIndex = index;
+    else previousIndex = index;
+  }
+  const latest = input.timelineEntries[latestIndex];
+  const previous = input.timelineEntries[previousIndex];
+  if (latest?.kind === "message" && !byUserMessageId.has(latest.message.id)) {
+    const previousTurnCount =
+      previous?.kind === "message" ? byUserMessageId.get(previous.message.id) : -1;
+    if (previousTurnCount !== undefined) {
+      const turnCount = previousTurnCount + 1;
+      if (
+        input.latestTurnRunning ||
+        input.turnDiffSummaries.some(
+          (summary) =>
+            (summary.checkpointTurnCount ??
+              input.inferredCheckpointTurnCountByTurnId[summary.turnId] ??
+              0) > turnCount,
+        )
+      ) {
+        byUserMessageId.set(latest.message.id, turnCount);
+      }
+    }
+  }
   return byUserMessageId;
 }
 
@@ -964,6 +998,8 @@ export function deriveMessagesTimelineRows(input: {
   const revertTurnCountByUserMessageId = buildRevertTurnCountByUserMessageId({
     supportsConversationRollback: input.supportsConversationRollback,
     timelineEntries: input.timelineEntries,
+    latestTurnRunning: input.latestTurn?.state === "running",
+    turnDiffSummaries: input.turnDiffSummaries,
     turnDiffSummaryByAssistantMessageId,
     inferredCheckpointTurnCountByTurnId: input.supportsConversationRollback
       ? inferCheckpointTurnCountByTurnId(input.turnDiffSummaries)
