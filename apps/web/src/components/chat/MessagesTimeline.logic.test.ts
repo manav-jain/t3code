@@ -32,6 +32,7 @@ import {
   shouldPreserveAssistantLineBreaks,
   type MessagesTimelineRow,
   type MessagesTimelineRowsProjection,
+  type TimelineLatestTurn,
   WORKTREE_SETUP_ROW_ID,
   workEntryDisplayLabel,
 } from "./MessagesTimeline.logic";
@@ -1660,6 +1661,95 @@ describe("deriveMessagesTimelineRows", () => {
 
     expect(userRow?.revertTurnCount).toBe(1);
     expect(assistantRow?.assistantTurnDiffSummary).toBe(assistantTurnDiffSummary);
+  });
+
+  it("lets the latest message rewind while its turn runs or after a silent stop", () => {
+    const userMessage = (id: string, createdAt: string) => ({
+      id: `${id}-entry`,
+      kind: "message" as const,
+      createdAt,
+      message: {
+        id: id as never,
+        role: "user" as const,
+        text: id,
+        turnId: null,
+        createdAt,
+        updatedAt: createdAt,
+        streaming: false,
+      },
+    });
+    const checkpoint = (
+      turnId: string,
+      assistantMessageId: string,
+      checkpointTurnCount: number,
+    ) => ({
+      turnId: turnId as never,
+      completedAt: "2026-01-01T00:00:30Z",
+      assistantMessageId: assistantMessageId as never,
+      checkpointTurnCount,
+      checkpointRef: `checkpoint-${checkpointTurnCount}` as never,
+      status: "ready" as const,
+      files: [],
+    });
+    const timelineEntries = [
+      userMessage("user-1", "2026-01-01T00:00:00Z"),
+      {
+        id: "assistant-entry",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:20Z",
+        message: {
+          id: "assistant-1" as never,
+          role: "assistant" as const,
+          text: "Done",
+          turnId: "turn-1" as never,
+          createdAt: "2026-01-01T00:00:20Z",
+          updatedAt: "2026-01-01T00:00:30Z",
+          streaming: false,
+        },
+      },
+      userMessage("user-2", "2026-01-01T00:01:00Z"),
+    ];
+    const latestRevertTurnCount = (input: {
+      latestTurn: TimelineLatestTurn;
+      turnDiffSummaries: ReadonlyArray<ReturnType<typeof checkpoint>>;
+    }) =>
+      deriveMessagesTimelineRows({
+        ...input,
+        timelineEntries,
+        isWorking: input.latestTurn.state === "running",
+        activeTurnStartedAt: null,
+        supportsConversationRollback: true,
+      }).find(
+        (row): row is Extract<MessagesTimelineRow, { kind: "message" }> =>
+          row.kind === "message" && row.message.id === "user-2",
+      )?.revertTurnCount;
+    const firstTurn = checkpoint("turn-1", "assistant-1", 1);
+    const turn = (turnId: string, state: TimelineLatestTurn["state"]) => ({
+      turnId: turnId as never,
+      state,
+      startedAt: "2026-01-01T00:01:00Z",
+      completedAt: null,
+    });
+
+    expect(
+      latestRevertTurnCount({
+        latestTurn: turn("turn-2", "running"),
+        turnDiffSummaries: [firstTurn],
+      }),
+    ).toBe(1);
+    expect(
+      latestRevertTurnCount({
+        latestTurn: turn("turn-2", "interrupted"),
+        turnDiffSummaries: [firstTurn, checkpoint("turn-2", "assistant:turn-2", 2)],
+      }),
+    ).toBe(1);
+    // Sent but not started yet: nothing to roll back on the provider.
+    expect(
+      latestRevertTurnCount({
+        latestTurn: turn("turn-1", "completed"),
+        turnDiffSummaries: [firstTurn],
+      }),
+    ).toBeUndefined();
   });
 
   it("folds the first assistant message and settled work before the terminal response", () => {

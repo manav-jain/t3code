@@ -8,6 +8,7 @@ import {
   ProjectId,
   type MessageId,
   type ModelSelection,
+  PLACEHOLDER_CHECKPOINT_REF_PREFIX,
   type PreviewAnnotationPayload,
   type ProviderInteractionMode,
   ProviderDriverKind,
@@ -1119,6 +1120,44 @@ export async function waitForStartedServerThread(
     timeoutId = globalThis.setTimeout(() => {
       finish(false);
     }, timeoutMs);
+  });
+}
+
+/**
+ * Resolves once a stopped turn has settled with its real checkpoint. The server
+ * captures that checkpoint and handles rewinds on one serial worker, so a
+ * rewind sent after this lands behind the capture and rolls the turn back.
+ */
+export async function waitForStoppedTurnCheckpoint(
+  threadRef: ScopedThreadRef,
+  turnId: TurnId,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const threadAtom = environmentThreadDetails.detailAtom(threadRef);
+  const settled = () => {
+    const thread = appAtomRegistry.get(threadAtom);
+    return (
+      thread != null &&
+      thread.latestTurn?.state !== "running" &&
+      thread.checkpoints.some(
+        (checkpoint) =>
+          checkpoint.turnId === turnId &&
+          !checkpoint.checkpointRef.startsWith(PLACEHOLDER_CHECKPOINT_REF_PREFIX),
+      )
+    );
+  };
+  if (settled()) return;
+  await new Promise<void>((resolve, reject) => {
+    const timeout = globalThis.setTimeout(() => {
+      unsubscribe();
+      reject(new Error("Timed out waiting for the turn to stop."));
+    }, timeoutMs);
+    const unsubscribe = appAtomRegistry.subscribe(threadAtom, () => {
+      if (!settled()) return;
+      globalThis.clearTimeout(timeout);
+      unsubscribe();
+      resolve();
+    });
   });
 }
 

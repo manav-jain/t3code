@@ -449,6 +449,7 @@ import {
   resolveFileAttachmentUrl,
   prepareRevertedMessageAttachments,
   waitForRevertedMessage,
+  waitForStoppedTurnCheckpoint,
   reconcileMountedTerminalThreadIds,
   recallCheckoutIsRepo,
   rememberCheckoutIsRepo,
@@ -3973,10 +3974,11 @@ export default function ChatView(props: ChatViewProps) {
   const restoreQueuedMessagesRef = useRef<(messages: ReadonlyArray<QueuedComposerMessage>) => void>(
     () => {},
   );
+  // Resolves true once the interrupt is accepted.
   const onInterrupt = useCallback(async () => {
     const { activeThread, phase, setThreadError } = interruptContextRef.current;
     const input = buildRunningThreadTurnInterruptInput(activeThread, phase);
-    if (!input || !activeThread) return;
+    if (!input || !activeThread) return false;
     restoreQueuedMessagesRef.current(
       useQueuedMessageStore
         .getState()
@@ -3992,7 +3994,9 @@ export default function ChatView(props: ChatViewProps) {
         activeThread.id,
         error instanceof Error ? error.message : "Failed to interrupt the current turn.",
       );
+      return false;
     }
+    return true;
   }, [interruptThreadTurn]);
   const canInterruptRunningThread =
     buildRunningThreadTurnInterruptInput(activeThread, phase) !== null;
@@ -7025,7 +7029,13 @@ export default function ChatView(props: ChatViewProps) {
         );
         return;
       }
-      if (phase === "running" || isSendBusy || isConnecting) {
+      // A running turn is stopped first, so a mistaken send can be undone in one step.
+      const runningTurnId = buildRunningThreadTurnInterruptInput(activeThread, phase)?.turnId;
+      if (
+        isSendBusy ||
+        isConnecting ||
+        ((phase === "running" || activeThread.latestTurn?.state === "running") && !runningTurnId)
+      ) {
         setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
         return;
       }
@@ -7059,6 +7069,10 @@ export default function ChatView(props: ChatViewProps) {
           throw new Error(
             "Make room for this message's attachments in the composer before rewinding.",
           );
+        }
+        if (runningTurnId) {
+          if (!(await onInterrupt())) return;
+          await waitForStoppedTurnCheckpoint(routeThreadRef, runningTurnId);
         }
         await waitForRevertedMessage(routeThreadRef, messageId, turnCount, async () => {
           const result = await revertThreadCheckpoint({
@@ -7126,6 +7140,7 @@ export default function ChatView(props: ChatViewProps) {
       isConnecting,
       isRevertingCheckpoint,
       isSendBusy,
+      onInterrupt,
       phase,
       revertThreadCheckpoint,
       routeThreadKey,
@@ -9927,8 +9942,9 @@ export default function ChatView(props: ChatViewProps) {
                 routeThreadKey={displayedTimelineKey}
                 displayThreadKey={displayedTimelineKey}
                 onOpenTurnDiff={paintOnlyDisplayedTimeline ? noopHeldTurnDiff : onOpenTurnDiff}
+                // Rewinds need checkpoints, which only git workspaces capture.
                 supportsConversationRollback={
-                  !paintOnlyDisplayedTimeline && supportsConversationRollback
+                  !paintOnlyDisplayedTimeline && supportsConversationRollback && isGitRepo
                 }
                 onRevertToTurnCount={
                   paintOnlyDisplayedTimeline ? noopHeldRevert : onRevertTimelineTurn
@@ -10448,6 +10464,7 @@ export default function ChatView(props: ChatViewProps) {
               {activeWorktreePath === null
                 ? " Files stay as they are because this thread shares the project directory."
                 : null}
+              {phase === "running" ? " The running turn stops first." : null}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

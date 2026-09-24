@@ -5,6 +5,7 @@ import {
   type OrchestrationEvent,
   OrchestrationProposedPlanId,
   CheckpointRef,
+  PLACEHOLDER_CHECKPOINT_REF_PREFIX,
   classifyTaskAgentKind,
   EventId,
   isToolLifecycleItemType,
@@ -2622,7 +2623,7 @@ const make = Effect.gen(function* () {
       threadId: thread.id,
       turnId,
       completedAt: now,
-      checkpointRef: CheckpointRef.make(`provider-diff:${event.eventId}`),
+      checkpointRef: CheckpointRef.make(`${PLACEHOLDER_CHECKPOINT_REF_PREFIX}${event.eventId}`),
       status: "missing",
       files: [],
       assistantMessageId: MessageId.make(
