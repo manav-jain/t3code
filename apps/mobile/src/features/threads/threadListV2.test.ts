@@ -1,5 +1,6 @@
 import { planPinnedMove } from "@t3tools/client-runtime/state/thread-sort";
 import {
+  computeThreadMoveAvailability,
   createPendingThreadOrder,
   createThreadMovePlanner,
   threadOrderAfterMove,
@@ -921,6 +922,64 @@ function makePendingTask(id: string): PendingNewTask {
     creation,
   };
 }
+
+describe("thread groups", () => {
+  const key = (id: string) => `${environmentId}:${id}`;
+  const threads = [
+    makeThread({ id: ThreadId.make("u1"), title: "u1", activeOrderKey: "m" }),
+    makeThread({ id: ThreadId.make("w1"), title: "w1", activeOrderKey: "c", groupName: "Work" }),
+    makeThread({ id: ThreadId.make("w2"), title: "w2", activeOrderKey: "x", groupName: "Work" }),
+    makeThread({ id: ThreadId.make("a1"), title: "a1", activeOrderKey: "e", groupName: "alpha" }),
+    makeThread({ id: ThreadId.make("p1"), title: "p1", pinnedAt: NOW, groupName: "Work" }),
+  ];
+  const ordered = getThreadListV2OrderedSection({ threads, section: "active", now: NOW });
+  const reorderableEnvironmentIds = new Set([environmentId]);
+
+  it("renders active groups under headers after the ungrouped cards", () => {
+    const layout = buildThreadListV2Items({
+      threads,
+      environmentId: null,
+      searchQuery: "",
+      now: NOW,
+    });
+    const items = buildThreadListV2ListItems({
+      items: layout.items,
+      pendingTasks: [],
+      groupHeaders: layout.groupHeaders,
+    });
+    expect(
+      items.map((item) =>
+        item.type === "v2-thread"
+          ? item.item.thread.id
+          : item.type === "v2-group-header"
+            ? `${item.name} (${item.count})`
+            : item.type,
+      ),
+    ).toEqual(["p1", "u1", "alpha (1)", "a1", "Work (2)", "w1", "w2"]);
+    expect(ordered.map((thread) => thread.id)).toEqual(["u1", "a1", "w1", "w2"]);
+  });
+
+  it("keeps moves inside the thread's group", () => {
+    const plan = createThreadMovePlanner({
+      ordered,
+      section: "active",
+      reorderableEnvironmentIds,
+    });
+    expect(plan(key("w1"), "up")).toBeNull();
+    expect(plan(key("u1"), { targetId: key("w1"), placement: "after" })).toBeNull();
+    const moved = plan(key("w2"), "up");
+    expect(moved).toEqual([{ id: key("w2"), orderKey: expect.any(String) }]);
+    expect(moved![0]!.orderKey < "c").toBe(true);
+    const availability = computeThreadMoveAvailability({
+      ordered,
+      section: "active",
+      reorderableEnvironmentIds,
+    });
+    expect(availability.get(key("u1"))).toEqual({ canMoveUp: false, canMoveDown: false });
+    expect(availability.get(key("w1"))).toEqual({ canMoveUp: false, canMoveDown: true });
+    expect(availability.get(key("w2"))).toEqual({ canMoveUp: true, canMoveDown: false });
+  });
+});
 
 describe("buildThreadListV2ListItems", () => {
   const layout = buildThreadListV2Items({

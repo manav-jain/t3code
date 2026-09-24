@@ -279,6 +279,7 @@ export function applyThreadDetailEvent(
           ...(event.payload.activeOrderKey !== undefined
             ? { activeOrderKey: event.payload.activeOrderKey }
             : {}),
+          ...(event.payload.groupName !== undefined ? { groupName: event.payload.groupName } : {}),
           updatedAt: event.payload.updatedAt,
         },
       };

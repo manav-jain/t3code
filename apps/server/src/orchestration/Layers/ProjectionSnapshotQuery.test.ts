@@ -209,6 +209,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           pinned_at,
           pin_order_key,
           active_order_key,
+          group_name,
           created_at,
           updated_at,
           deleted_at
@@ -232,6 +233,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           '2026-02-24T00:00:01.000Z',
           'gm',
           'hq',
+          'Work',
           '2026-02-24T00:00:02.000Z',
           '2026-02-24T00:00:03.000Z',
           NULL
@@ -486,6 +488,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           pinnedAt: "2026-02-24T00:00:01.000Z",
           pinOrderKey: "gm",
           activeOrderKey: "hq",
+          groupName: "Work",
           titleRegeneration: null,
           titleState: null,
           deletedAt: null,
@@ -613,6 +616,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           pinnedAt: "2026-02-24T00:00:01.000Z",
           pinOrderKey: "gm",
           activeOrderKey: "hq",
+          groupName: "Work",
           titleRegeneration: null,
           titleState: null,
           session: {
@@ -703,6 +707,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       assert.equal(detailWithoutActivities._tag, "Some");
       if (detailWithoutActivities._tag === "Some") {
         assert.equal(detailWithoutActivities.value.activeOrderKey, "hq");
+        assert.equal(detailWithoutActivities.value.groupName, "Work");
         assert.deepEqual(detailWithoutActivities.value.activities, []);
         assert.deepEqual(detailWithoutActivities.value.messages, snapshot.threads[0]?.messages);
         assert.deepEqual(

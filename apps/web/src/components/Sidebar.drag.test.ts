@@ -311,6 +311,29 @@ describe("sidebar drag projection", () => {
     }
   });
 
+  it("opens the gap inside the group run the thread will join", () => {
+    const work = sidebarMarkerId("group:Work");
+    const items = [
+      pinnedHeader,
+      divider,
+      marker("active-placeholder"),
+      thread("u1", "active"),
+      marker("group:Work"),
+      thread("w1", "active"),
+      thread("w2", "active"),
+      settledHeader,
+      marker("settled-placeholder"),
+    ];
+    const result = preview({ items, settledOrder: [], settledExpanded: false }, "u1", "w1");
+    const { rects } = layout(items, "u1", "w1");
+    const top = (id: string) =>
+      rects[items.findIndex((item) => sidebarListItemId(item) === id)]!.top + result.get(id)!.y;
+    expect(result.get(work)?.scaleY).toBe(1);
+    expect(top(work)).toBeLessThan(top("w1"));
+    // One card of room opens between w1 and w2, under the Work header.
+    expect(top("w2") - top("w1")).toBeGreaterThan(2 * 82);
+  });
+
   it("keeps the pinned header above the gap when a lower pin moves to the top", () => {
     const result = preview(
       { items: pinned, settledOrder: [], settledExpanded: true },

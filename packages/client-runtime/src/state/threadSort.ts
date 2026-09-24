@@ -354,6 +354,53 @@ export function sortActiveThreadsByOrderKey<
   });
 }
 
+// ── Manual groups ──────────────────────────────────────────────────────
+// A group is only the groupName its threads carry; it exists while some
+// thread does. Every client orders groups with this one comparator so web
+// and mobile render the same list: ungrouped first, then case-insensitive
+// alphabetical (plain code-unit comparison, so Hermes and V8 agree), with
+// the exact name as tiebreak since "Work" and "work" are distinct groups.
+export function compareThreadGroupNames(left: string | null, right: string | null): number {
+  if (left === right) return 0;
+  if (left === null) return -1;
+  if (right === null) return 1;
+  const leftFolded = left.toLowerCase();
+  const rightFolded = right.toLowerCase();
+  if (leftFolded !== rightFolded) return leftFolded < rightFolded ? -1 : 1;
+  return left < right ? -1 : 1;
+}
+
+/** Distinct group names of the live (unarchived) threads, in display order. */
+export function listThreadGroupNames(
+  threads: Iterable<{
+    readonly groupName?: string | null | undefined;
+    readonly archivedAt?: string | null | undefined;
+  }>,
+): string[] {
+  const names = new Set<string>();
+  for (const thread of threads) {
+    if (thread.groupName != null && thread.archivedAt == null) names.add(thread.groupName);
+  }
+  return [...names].sort(compareThreadGroupNames);
+}
+
+/** Stable partition of an ordered active list into runs: ungrouped first,
+    then one run per group, each keeping its input order. */
+export function groupActiveThreads<T extends { readonly groupName?: string | null | undefined }>(
+  threads: readonly T[],
+): Array<{ readonly name: string | null; readonly threads: T[] }> {
+  const runs = new Map<string | null, T[]>();
+  for (const thread of threads) {
+    const name = thread.groupName ?? null;
+    const run = runs.get(name);
+    if (run) run.push(thread);
+    else runs.set(name, [thread]);
+  }
+  return [...runs]
+    .map(([name, threads]) => ({ name, threads }))
+    .sort((left, right) => compareThreadGroupNames(left.name, right.name));
+}
+
 /**
  * planPinnedReorder specialized for mobile's Move up / Move down menu
  * actions: swap the moved thread with its displayed neighbor. Null when the

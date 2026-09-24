@@ -1,4 +1,5 @@
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
+import { requestThreadGroupName } from "../components/ThreadGroupDialog";
 import { scopeProjectRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import {
   type AtomCommandResult,
@@ -7,6 +8,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
+import { listThreadGroupNames } from "@t3tools/client-runtime/state/thread-sort";
 import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
@@ -14,6 +16,7 @@ import { useCallback, useMemo } from "react";
 import { resolveSnoozePresets } from "../components/Sidebar.snooze";
 import {
   buildThreadActionMenuItems,
+  resolveThreadGroupMenuPick,
   type ThreadActionMenuId,
 } from "../components/threadActionMenu.logic";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
@@ -23,8 +26,10 @@ import {
   readEnvironmentSupportsPinning,
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
+  readEnvironmentSupportsThreadGroups,
   readEnvironmentSupportsTitleRegeneration,
   readThreadShell,
+  readThreadShells,
   useProjects,
 } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
@@ -90,6 +95,7 @@ export function useThreadActionMenu(input: {
     confirmAndUnpinThread,
     archiveThread,
     deleteThread,
+    setThreadGroup,
   } = useThreadActions();
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
@@ -135,6 +141,7 @@ export function useThreadActionMenu(input: {
           snooze: readEnvironmentSupportsSnooze(threadRef.environmentId),
           pinning: readEnvironmentSupportsPinning(threadRef.environmentId),
           titleRegeneration: readEnvironmentSupportsTitleRegeneration(threadRef.environmentId),
+          groups: readEnvironmentSupportsThreadGroups(threadRef.environmentId),
         };
         const isRegeneratingTitle = thread.titleRegeneration != null;
         const snoozePresets = resolveSnoozePresets(now, timestampFormat);
@@ -148,6 +155,8 @@ export function useThreadActionMenu(input: {
           isSnoozed: supports.snooze && effectiveSnoozed(thread, { now: now.toISOString() }),
           canSnoozeNow: canSnooze(thread, { now: now.toISOString() }),
           isRegeneratingTitle,
+          groupName: thread.groupName ?? null,
+          groupNames: supports.groups ? listThreadGroupNames(readThreadShells()) : [],
           isRunning: thread.session?.status === "running" && thread.session.activeTurnId != null,
           supports,
           snoozePresets,
@@ -176,6 +185,13 @@ export function useThreadActionMenu(input: {
             failureToast(title, squashAtomCommandFailure(result));
           }
         };
+        const groupName = await resolveThreadGroupMenuPick(action, () =>
+          requestThreadGroupName({ title: "New group", confirmLabel: "Create" }),
+        );
+        if (groupName !== undefined) {
+          await reportFailure("Failed to move thread", () => setThreadGroup(threadRef, groupName));
+          return;
+        }
         switch (action) {
           case "project-settings": {
             const project = projects.find(
@@ -333,6 +349,7 @@ export function useThreadActionMenu(input: {
       projectGroupingSettings,
       projects,
       router,
+      setThreadGroup,
       settleThread,
       snoozeThread,
       threadRef,

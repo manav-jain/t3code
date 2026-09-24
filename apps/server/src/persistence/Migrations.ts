@@ -65,7 +65,8 @@ import Migration0050 from "./Migrations/050_ProjectionThreadPullRequests.ts";
 import Migration0051 from "./Migrations/051_ProjectionThreadMessageContext.ts";
 import Migration0052 from "./Migrations/052_ProjectionThreadTitleState.ts";
 import Migration0053 from "./Migrations/053_PullRequestFilesViewed.ts";
-import Migration0054 from "./Migrations/054_ProjectionThreadsSlackThreads.ts";
+import ForkMigration0001 from "./Migrations/fork/001_ProjectionThreadsSlackThreads.ts";
+import ForkMigration0002 from "./Migrations/fork/002_ProjectionThreadsGroupName.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -131,7 +132,17 @@ const migrationEntries = [
   [51, "ProjectionThreadMessageContext", Migration0051],
   [52, "ProjectionThreadTitleState", Migration0052],
   [53, "PullRequestFilesViewed", Migration0053],
-  [54, "ProjectionThreadsSlackThreads", Migration0054],
+] as const;
+
+/**
+ * Fork-only schema changes, recorded in their own ledger. The migrator skips
+ * every id at or below the highest one it has recorded, so a fork entry in
+ * migrationEntries would silently skip upstream's migration with the same id
+ * after a rebase. Never add fork migrations to migrationEntries.
+ */
+const forkMigrationEntries = [
+  [1, "ProjectionThreadsSlackThreads", ForkMigration0001],
+  [2, "ProjectionThreadsGroupName", ForkMigration0002],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -169,6 +180,16 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   toMigrationInclusive,
 }: RunMigrationsOptions = {}) {
   const executedMigrations = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) });
+  if (toMigrationInclusive === undefined) {
+    yield* run({
+      loader: Migrator.fromRecord(
+        Object.fromEntries(
+          forkMigrationEntries.map(([id, name, migration]) => [`${id}_${name}`, migration]),
+        ),
+      ),
+      table: "fork_sql_migrations",
+    });
+  }
   const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`);
   yield* migrations.length === 0
     ? Effect.logDebug("Database schema is current")

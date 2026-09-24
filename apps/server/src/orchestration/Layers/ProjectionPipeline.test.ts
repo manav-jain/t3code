@@ -490,11 +490,11 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       yield* sql`DROP TRIGGER count_thread_shell_updates`;
       yield* sql`DROP TABLE thread_shell_updates`;
 
-      // Replayed order events must survive later lifecycle upserts, whose
-      // complete SQL row writes otherwise risk dropping the placement.
+      // Replayed order and group events must survive later lifecycle upserts,
+      // whose complete SQL row writes otherwise risk dropping the placement.
       const orderUpdatedAt = "2026-01-01T00:00:00.200Z";
       const orderEvents = [
-        { type: "thread.meta-updated", payload: { activeOrderKey: "gm" } },
+        { type: "thread.meta-updated", payload: { activeOrderKey: "gm", groupName: "Work" } },
         { type: "thread.pinned", payload: { pinnedAt: now, pinOrderKey: "m" } },
         {
           type: "thread.snoozed",
@@ -524,12 +524,16 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         yield* projectionPipeline.bootstrap;
         const rows = yield* sql<{
           readonly activeOrderKey: string | null;
+          readonly groupName: string | null;
           readonly updatedAt: string;
         }>`
-          SELECT active_order_key AS "activeOrderKey", updated_at AS "updatedAt"
+          SELECT active_order_key AS "activeOrderKey", group_name AS "groupName",
+            updated_at AS "updatedAt"
           FROM projection_threads WHERE thread_id = 'thread-1'
         `;
-        assert.deepEqual(rows, [{ activeOrderKey: "gm", updatedAt: orderUpdatedAt }]);
+        assert.deepEqual(rows, [
+          { activeOrderKey: "gm", groupName: "Work", updatedAt: orderUpdatedAt },
+        ]);
       }
 
       // Settled lifecycle through the DB pipeline: thread.settled writes the

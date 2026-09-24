@@ -159,6 +159,67 @@ it.layer(NodeServices.layer)("active thread ordering", (it) => {
       }),
   );
 
+  it.effect("sets, moves and clears a group without changing activity or placement", () =>
+    Effect.gen(function* () {
+      let readModel = makeReadModel({ activeOrderKey: "m" });
+      for (const groupName of ["Work", "Personal", null]) {
+        const decided = yield* decideOrchestrationCommand({
+          command: {
+            type: "thread.meta.update",
+            commandId: CommandId.make(`group-${groupName}`),
+            threadId: THREAD_ID,
+            groupName,
+          },
+          readModel,
+        });
+        const events = Array.isArray(decided) ? decided : [decided];
+        expect(events).toHaveLength(1);
+        expect(events[0]).toMatchObject({
+          type: "thread.meta-updated",
+          payload: { threadId: THREAD_ID, groupName, updatedAt: NOW },
+        });
+        for (const event of events) {
+          readModel = yield* projectEvent(readModel, {
+            ...event,
+            sequence: readModel.snapshotSequence + 1,
+          });
+        }
+        expect(readModel.threads[0]).toMatchObject({
+          groupName,
+          activeOrderKey: "m",
+          updatedAt: NOW,
+        });
+      }
+    }),
+  );
+
+  it.effect("keeps the group through rename, pin and settlement", () =>
+    Effect.gen(function* () {
+      let readModel = makeReadModel({ groupName: "Work" });
+      const steps = [
+        { type: "thread.meta.update", title: "Renamed" },
+        { type: "thread.pin", orderKey: "g" },
+        { type: "thread.settle" },
+        { type: "thread.unsettle", reason: "user" },
+      ] as const;
+      for (const [index, step] of steps.entries()) {
+        const command: OrchestrationCommand = {
+          ...step,
+          commandId: CommandId.make(`keep-group-${index}`),
+          threadId: THREAD_ID,
+        };
+        const decided = yield* decideOrchestrationCommand({ command, readModel });
+        for (const event of Array.isArray(decided) ? decided : [decided]) {
+          readModel = yield* projectEvent(readModel, {
+            ...event,
+            sequence: readModel.snapshotSequence + 1,
+          });
+        }
+        expect(readModel.threads[0]?.groupName, command.type).toBe("Work");
+      }
+    }),
+  );
+
   it.effect("keeps placement through metadata, pin and snooze, then resets it on settlement", () =>
     Effect.gen(function* () {
       let readModel = makeReadModel();

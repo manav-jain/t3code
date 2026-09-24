@@ -1,6 +1,8 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import {
+  compareThreadGroupNames,
   generateSpreadPinOrderKeys,
+  groupActiveThreads,
   pinOrderKeyBetween,
   planPinnedReorder,
 } from "@t3tools/client-runtime/state/thread-sort";
@@ -52,6 +54,7 @@ export type OrderRow = Pick<
   | "environmentId"
   | "pinOrderKey"
   | "activeOrderKey"
+  | "groupName"
   | "createdAt"
   | "unsettledAt"
   | "pinnedAt"
@@ -97,11 +100,25 @@ export function createThreadMovePlanner(input: {
       .filter((row) => input.reorderableEnvironmentIds.has(row.environmentId))
       .map(rowId),
   );
+  const groupsById = new Map(
+    (input.allThreads ?? input.ordered).map((row) => [rowId(row), row.groupName ?? null]),
+  );
+  const groupOf = (id: string) => groupsById.get(id) ?? null;
   return (movedId: string, direction: ThreadMoveDestination) => {
     if (!writableIds.has(movedId)) return null;
     const nextIds = threadOrderAfterMove(orderedIds, movedId, direction);
     if (nextIds === null) return null;
-    const assignments = planPinnedReorder({ orderedIds: nextIds, keysById, movedId });
+    // Active groups render as separate runs (see groupActiveThreads): a move
+    // must leave the order partitioned, and keys only against its own run.
+    let runIds = nextIds;
+    if (input.section === "active") {
+      for (let index = 1; index < nextIds.length; index += 1) {
+        if (compareThreadGroupNames(groupOf(nextIds[index - 1]!), groupOf(nextIds[index]!)) > 0)
+          return null;
+      }
+      runIds = nextIds.filter((id) => groupOf(id) === groupOf(movedId));
+    }
+    const assignments = planPinnedReorder({ orderedIds: runIds, keysById, movedId });
     return assignments === null ||
       assignments.length === 0 ||
       assignments.some((assignment) => !writableIds.has(assignment.id))
@@ -133,6 +150,20 @@ export function computeThreadMoveAvailability(input: {
   const result = new Map<string, ThreadMoveAvailability>();
   // A reorder in flight locks the whole list until its receipt lands.
   if (input.pendingOrder != null) return result;
+  // Each active group is its own run: moves never cross a run boundary, and
+  // the planner keys only against the run (see createThreadMovePlanner).
+  const runs = input.section === "active" ? groupActiveThreads(input.ordered) : [];
+  if (runs.length > 1) {
+    for (const run of runs) {
+      const availability = computeThreadMoveAvailability({
+        ...input,
+        ordered: run.threads,
+        allThreads: input.allThreads ?? input.ordered,
+      });
+      for (const [id, entry] of availability) result.set(id, entry);
+    }
+    return result;
+  }
   const rows = input.ordered;
   const orderedIds = rows.map(rowId);
   const indexById = new Map(orderedIds.map((id, index) => [id, index] as const));

@@ -512,6 +512,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       would fall off the end of the list. */
   readonly canMoveUp?: boolean;
   readonly canMoveDown?: boolean;
+  /** Existing groups for "Move to group". Absent when the server predates
+      thread groups, which hides the item. Pass a stable array: rows memoize. */
+  readonly groupNames?: ReadonlyArray<string>;
+  readonly onSetThreadGroup?: (thread: EnvironmentThreadShell, groupName: string | null) => void;
+  readonly onPromptThreadGroup?: (thread: EnvironmentThreadShell) => void;
   readonly onSwipeableWillOpen: (methods: SwipeableMethods) => void;
   readonly onSwipeableClose: (methods: SwipeableMethods) => void;
   readonly searchMatch?: EnvironmentThreadSearchMatch;
@@ -537,6 +542,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     onPinThread,
     onUnpinThread,
     onMoveThread,
+    onSetThreadGroup,
+    onPromptThreadGroup,
   } = props;
   const snoozedRow = props.snoozed === true;
   const pinnedRow = props.pinned === true;
@@ -651,12 +658,34 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               : { id: "pin", title: "Pin", image: "pin" },
           ]
         : []),
+      ...(props.groupNames !== undefined
+        ? [
+            {
+              id: "move-to-group",
+              title: "Move to group",
+              image: "folder",
+              subactions: [
+                ...props.groupNames.map((name): MenuAction => ({
+                  id: `group:${name}`,
+                  title: name,
+                  state: name === thread.groupName ? "on" : "off",
+                })),
+                { id: "new-group", title: "New group…", image: "plus" },
+                ...(thread.groupName != null
+                  ? [{ id: "remove-from-group", title: "Remove from group", image: "minus.circle" }]
+                  : []),
+              ],
+            } satisfies MenuAction,
+          ]
+        : []),
     ],
     [
       props.canMoveDown,
       props.canMoveUp,
+      props.groupNames,
       props.reorderSupported,
       props.pinningSupported,
+      thread.groupName,
       thread.pinnedAt,
       variant,
     ],
@@ -730,6 +759,12 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       if (nativeEvent.event === "arrange") appAtomRegistry.set(threadArrangementOpenAtom, true);
       if (nativeEvent.event === "move-up") handleMoveUp();
       if (nativeEvent.event === "move-down") handleMoveDown();
+      if (nativeEvent.event.startsWith("group:")) {
+        const groupName = nativeEvent.event.slice("group:".length);
+        if (groupName !== thread.groupName) onSetThreadGroup?.(thread, groupName);
+      }
+      if (nativeEvent.event === "remove-from-group") onSetThreadGroup?.(thread, null);
+      if (nativeEvent.event === "new-group") onPromptThreadGroup?.(thread);
       if (nativeEvent.event === "archive") handleArchive();
       if (nativeEvent.event === "rename") handleRename();
       if (nativeEvent.event === "regenerate-title") handleRegenerateTitle();
@@ -754,6 +789,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     },
     [
       onNewThreadOnBranch,
+      onPromptThreadGroup,
+      onSetThreadGroup,
       thread,
       handleArchive,
       handleDelete,
