@@ -983,6 +983,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ? thread.branch
           : command.branch;
       const occurredAt = yield* nowIso;
+      const groupOnly =
+        command.groupName !== undefined &&
+        Object.entries(command).every(
+          ([key, value]) =>
+            value === undefined || ["type", "commandId", "threadId", "groupName"].includes(key),
+        );
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -1029,7 +1035,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.linkedPullRequest !== undefined
             ? { linkedPullRequest: command.linkedPullRequest }
             : {}),
-          updatedAt: occurredAt,
+          ...(command.groupName !== undefined ? { groupName: command.groupName } : {}),
+          // Grouping arranges the list; like thread.active.reorder it is not
+          // thread activity, so a group-only update keeps updatedAt.
+          updatedAt: groupOnly ? thread.updatedAt : occurredAt,
         },
       };
     }

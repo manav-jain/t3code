@@ -1,4 +1,5 @@
 import type { ThreadMoveDestination } from "../threads/threadOrder";
+import { THREAD_GROUP_NAME_MAX_LENGTH } from "@t3tools/contracts";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import * as Cause from "effect/Cause";
@@ -65,6 +66,13 @@ function environmentSupportsTitleRegeneration(
   return (
     appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
       .threadTitleRegeneration === true
+  );
+}
+
+function environmentSupportsThreadGroups(environmentId: EnvironmentThreadShell["environmentId"]) {
+  return (
+    appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
+      .threadGroups === true
   );
 }
 
@@ -243,6 +251,10 @@ export function useThreadListActions(): {
   ) => Promise<boolean>;
   readonly renameThread: (thread: EnvironmentThreadShell) => void;
   readonly regenerateThreadTitle: (thread: EnvironmentThreadShell) => Promise<boolean>;
+  /** Null removes the thread from its group. */
+  readonly setThreadGroup: (thread: EnvironmentThreadShell, groupName: string | null) => void;
+  /** Asks for a new group name, then moves the thread into it. */
+  readonly promptThreadGroup: (thread: EnvironmentThreadShell) => void;
 } {
   const executeAction = useThreadActionExecutor();
   const snoozeMutation = useAtomCommand(threadEnvironment.snooze, { reportFailure: false });
@@ -250,6 +262,9 @@ export function useThreadListActions(): {
   const pinMutation = useAtomCommand(threadEnvironment.pin, { reportFailure: false });
   const unpinMutation = useAtomCommand(threadEnvironment.unpin, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
+    reportFailure: false,
+  });
+  const setThreadGroupMutation = useAtomCommand(threadEnvironment.setGroup, {
     reportFailure: false,
   });
   const snoozeInFlightThreadKeys = useRef(new Set<string>());
@@ -521,6 +536,59 @@ export function useThreadListActions(): {
     [updateThreadMetadata],
   );
 
+  const setThreadGroup = useCallback(
+    (thread: EnvironmentThreadShell, groupName: string | null) => {
+      if (!environmentSupportsThreadGroups(thread.environmentId)) {
+        Alert.alert(
+          "Could not move thread",
+          "This environment's server does not support thread groups yet. Update the server to group threads.",
+        );
+        return;
+      }
+      selectionHaptic();
+      void setThreadGroupMutation({
+        environmentId: thread.environmentId,
+        input: { threadId: thread.id, groupName },
+      }).then((result) => {
+        if (result._tag === "Success") return;
+        const error = Cause.squash(result.cause);
+        Alert.alert(
+          "Could not move thread",
+          error instanceof Error && error.message.trim().length > 0
+            ? error.message
+            : "The thread could not be moved to that group.",
+        );
+      });
+    },
+    [setThreadGroupMutation],
+  );
+  const promptThreadGroup = useCallback(
+    (thread: EnvironmentThreadShell) => {
+      const commit = (name: string) => {
+        const trimmed = name.trim();
+        if (trimmed.length > THREAD_GROUP_NAME_MAX_LENGTH) {
+          Alert.alert(
+            "Group name too long",
+            `Use at most ${THREAD_GROUP_NAME_MAX_LENGTH} characters.`,
+          );
+          return;
+        }
+        if (trimmed.length > 0) setThreadGroup(thread, trimmed);
+      };
+      if (Platform.OS === "ios") {
+        Alert.prompt("New group", undefined, (name) => commit(name ?? ""), "plain-text");
+        return;
+      }
+      showTextInputDialog({
+        title: "New group",
+        initialValue: "",
+        confirmText: "Create",
+        onConfirm: commit,
+      });
+    },
+    [setThreadGroup],
+  );
+
   // Plan against the complete section so filtering does not change a move.
   const reorderPinnedMutation = useAtomCommand(threadEnvironment.reorderPin, {
     reportFailure: false,
@@ -701,6 +769,8 @@ export function useThreadListActions(): {
     moveThread,
     renameThread,
     regenerateThreadTitle,
+    setThreadGroup,
+    promptThreadGroup,
   };
 }
 

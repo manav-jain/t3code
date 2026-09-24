@@ -84,6 +84,15 @@ If dragging is unavailable for one environment, update the T3 Code server runnin
 environment. Pinned and active reordering require server support. Threads from older servers keep
 their default order until the server is updated.
 
+## Group threads
+
+Choose **Move to group** in a thread's menu to file it under a group, or pick **New group…**
+there to start one, such as "Work". Active threads appear under their group's header, and a group
+disappears when its last thread leaves. On web and desktop, click a header to collapse it,
+right-click it to rename or ungroup, or drag a thread into another group's rows. Groups need an
+updated server and sync across your devices. Drag a group's header to reorder groups on web and
+desktop; the order is saved on that device, and groups you haven't placed follow alphabetically.
+
 ## Settle finished work
 
 Choose **Settle thread** from its menu to move finished work out of the active list

@@ -11,6 +11,7 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import {
+  groupActiveThreads,
   sortActiveThreadsByOrderKey,
   resolveSettledThreadTimestamp,
   sortPinnedThreadsByOrderKey,
@@ -155,7 +156,8 @@ export function sortThreadsForListV2<
   return sortActiveThreadsByOrderKey(threads);
 }
 
-/** Canonical card section for Move up/down, independent of search or scope. */
+/** Canonical card section for Move up/down, independent of search or scope.
+    Active threads come grouped the way the list renders them. */
 export function getThreadListV2OrderedSection(input: {
   readonly threads: readonly EnvironmentThreadShell[];
   readonly section: "pinned" | "active";
@@ -185,7 +187,7 @@ export function getThreadListV2OrderedSection(input: {
   const ordered =
     input.section === "pinned"
       ? sortPinnedThreadsByOrderKey(threads)
-      : sortActiveThreadsByOrderKey(threads);
+      : groupActiveThreads(sortActiveThreadsByOrderKey(threads)).flatMap((run) => run.threads);
   const pending =
     input.pendingOrder?.section === input.section
       ? reconcilePendingThreadOrder(input.pendingOrder, ordered)
@@ -216,6 +218,8 @@ export interface ThreadListV2Layout {
   readonly settledCount: number;
   /** Index in `items` where the Settled shelf header belongs. */
   readonly settledShelfHeaderIndex: number | null;
+  /** Active group headers: each sits before `items[index]` and counts its run. */
+  readonly groupHeaders: ReadonlyArray<ThreadListV2GroupHeader>;
   /** Soonest wake time among snoozed threads, or null. Callers arm
       a timeout at this boundary so the list re-partitions the moment a
       snooze expires instead of on the next minute tick. */
@@ -275,6 +279,17 @@ export interface ThreadListV2SnoozedShelfListItem {
   readonly disabled: boolean;
 }
 
+export interface ThreadListV2GroupHeader {
+  readonly index: number;
+  readonly name: string;
+  readonly count: number;
+}
+
+export interface ThreadListV2GroupHeaderListItem extends Omit<ThreadListV2GroupHeader, "index"> {
+  readonly type: "v2-group-header";
+  readonly key: string;
+}
+
 export interface ThreadListV2SettledShelfListItem {
   readonly type: "v2-settled-shelf";
   readonly key: "v2-settled-shelf";
@@ -288,7 +303,8 @@ export type ThreadListV2ListItem =
   | ThreadListV2ThreadListItem
   | ThreadListV2PendingListItem
   | ThreadListV2SnoozedShelfListItem
-  | ThreadListV2SettledShelfListItem;
+  | ThreadListV2SettledShelfListItem
+  | ThreadListV2GroupHeaderListItem;
 
 /** Narrows a wider list-item union (e.g. the sidebar's legacy + v2 mix) to
     the v2 item kinds the shared equality understands. */
@@ -299,7 +315,8 @@ export function isThreadListV2ListItem(value: {
     value.type === "v2-thread" ||
     value.type === "v2-pending" ||
     value.type === "v2-snoozed-shelf" ||
-    value.type === "v2-settled-shelf"
+    value.type === "v2-settled-shelf" ||
+    value.type === "v2-group-header"
   );
 }
 
@@ -353,6 +370,12 @@ export function threadListV2ListItemsAreEqual(
         previous.expanded === item.expanded &&
         previous.disabled === item.disabled
       );
+    case "v2-group-header":
+      return (
+        previous.type === "v2-group-header" &&
+        previous.key === item.key &&
+        previous.count === item.count
+      );
   }
 }
 
@@ -388,6 +411,7 @@ export function buildThreadListV2ListItems(input: {
   readonly settledCount?: number;
   readonly settledShelfExpanded?: boolean;
   readonly settledShelfHeaderIndex?: number | null;
+  readonly groupHeaders?: ReadonlyArray<ThreadListV2GroupHeader>;
   readonly snoozeLabelNow?: string;
   /** Environments whose server supports thread.snooze. Rows on other
       environments never carry the minute clock that feeds the snooze menu.
@@ -454,7 +478,18 @@ export function buildThreadListV2ListItems(input: {
   const settledShelfHeaderIndex = input.settledShelfHeaderIndex ?? null;
   const activeEnd = snoozedShelfHeaderIndex ?? settledShelfHeaderIndex ?? threadItems.length;
   const snoozedEnd = settledShelfHeaderIndex ?? threadItems.length;
-  const result: ThreadListV2ListItem[] = [...threadItems.slice(0, activeEnd), ...pendingItems];
+  const result: ThreadListV2ListItem[] = [];
+  let groupStart = 0;
+  for (const header of input.groupHeaders ?? []) {
+    result.push(...threadItems.slice(groupStart, header.index), {
+      type: "v2-group-header",
+      key: `v2-group:${header.name}`,
+      name: header.name,
+      count: header.count,
+    });
+    groupStart = header.index;
+  }
+  result.push(...threadItems.slice(groupStart, activeEnd), ...pendingItems);
   const shelfDisabled = input.shelfPreferencesLoading === true;
   if (snoozedShelfHeaderIndex !== null && snoozedCount > 0) {
     result.push({
@@ -639,14 +674,21 @@ export function buildThreadListV2Items(input: {
       isLast: false,
     });
   }
-  for (const thread of orderedActive) {
-    items.push({
-      thread,
-      variant: "card",
-      snoozed: false,
-      pinned: false,
-      isLast: false,
-    });
+  // Ungrouped cards lead; each group follows under its own header.
+  const groupHeaders: ThreadListV2GroupHeader[] = [];
+  for (const run of groupActiveThreads(orderedActive)) {
+    if (run.name !== null) {
+      groupHeaders.push({ index: items.length, name: run.name, count: run.threads.length });
+    }
+    for (const thread of run.threads) {
+      items.push({
+        thread,
+        variant: "card",
+        snoozed: false,
+        pinned: false,
+        isLast: false,
+      });
+    }
   }
   const snoozedShelfHeaderIndex = orderedSnoozed.length > 0 ? items.length : null;
   for (const thread of visibleSnoozed) {
@@ -679,6 +721,7 @@ export function buildThreadListV2Items(input: {
     snoozedShelfHeaderIndex,
     settledCount: orderedSettled.length,
     settledShelfHeaderIndex,
+    groupHeaders,
     nextSnoozeWakeAt,
   };
 }

@@ -9,7 +9,10 @@ import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-searc
 import type { ContextMenuItem, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import type { AsyncResult } from "effect/unstable/reactivity";
-import { planPinnedReorder } from "@t3tools/client-runtime/state/thread-sort";
+import {
+  compareThreadGroupNames,
+  planPinnedReorder,
+} from "@t3tools/client-runtime/state/thread-sort";
 import {
   effectiveSnoozed,
   type ThreadSnoozeShell,
@@ -112,7 +115,8 @@ export const animateSidebarLayoutChanges: AnimateLayoutChanges = (args) =>
 // the lifecycle action; Sidebar.drag previews the resulting layout. Pinned
 // and active threads keep the dragged position; settled threads use time
 // order. Snoozed rows can leave the shelf, but dropping into it is not
-// supported because snoozing requires a wake time.
+// supported because snoozing requires a wake time. Group headers split the
+// active section into runs, and a drop takes the group of the run it lands in.
 
 export type SidebarSection = "pinned" | "active" | "snoozed" | "settled";
 
@@ -129,10 +133,74 @@ export type SidebarListMarker =
   /** The boundary between pinned and active rows. */
   | "pinned-divider"
   | "snoozed-header"
-  | "settled-header";
+  | "settled-header"
+  /** A manual group's header inside the active section. */
+  | `group:${string}`;
 
 export function sidebarMarkerId(marker: SidebarListMarker): string {
   return `${SIDEBAR_MARKER_PREFIX}${marker}`;
+}
+
+export function sidebarGroupMarker(name: string): SidebarListMarker {
+  return `group:${name}`;
+}
+
+/** The group a marker heads, or null for structural markers. */
+export function sidebarMarkerGroup(marker: SidebarListMarker): string | null {
+  return marker.startsWith("group:") ? marker.slice("group:".length) : null;
+}
+
+const SIDEBAR_GROUP_ID_PREFIX = sidebarMarkerId("group:");
+
+/** The group whose header has this sortable id; null for rows and other markers. */
+export function sidebarGroupAtId(id: string): string | null {
+  return id.startsWith(SIDEBAR_GROUP_ID_PREFIX) ? id.slice(SIDEBAR_GROUP_ID_PREFIX.length) : null;
+}
+
+/** Web group order: the device's manual `groupOrder` first, in that order,
+    then the remaining groups A-Z. Ungrouped (null) always leads, and names
+    in `groupOrder` that no group carries any more simply never match. */
+export function sidebarGroupComparator(
+  groupOrder: readonly string[],
+): (left: string | null, right: string | null) => number {
+  const rank = new Map(groupOrder.map((name, index) => [name, index] as const));
+  const rankOf = (name: string | null) =>
+    name === null ? -1 : (rank.get(name) ?? groupOrder.length);
+  return (left, right) => rankOf(left) - rankOf(right) || compareThreadGroupNames(left, right);
+}
+
+/** The manual group order after dropping the header `activeId` on `overId`.
+    Mirrors the sortable's arrayMove: moved up, a group lands before the one
+    it is over; moved down, after it. `groupNames` is every current group in
+    display order, so groups a filter hides keep their slots and names no
+    longer in use drop out. Null for thread drags and drops that move nothing. */
+export function planSidebarGroupDrop(input: {
+  readonly activeId: string;
+  readonly overId: string | null;
+  readonly groupNames: readonly string[];
+}): string[] | null {
+  const dragged = sidebarGroupAtId(input.activeId);
+  const over = input.overId === null ? null : sidebarGroupAtId(input.overId);
+  if (dragged === null || over === null || dragged === over) return null;
+  const from = input.groupNames.indexOf(dragged);
+  const to = input.groupNames.indexOf(over);
+  if (from === -1 || to === -1) return null;
+  const next = input.groupNames.filter((name) => name !== dragged);
+  next.splice(next.indexOf(over) + (from < to ? 1 : 0), 0, dragged);
+  return next;
+}
+
+/** `groupOrder` after renaming a group (null: ungrouping it). The new name
+    takes the old one's slot unless it already has its own, as when merging. */
+export function renameInSidebarGroupOrder(
+  groupOrder: readonly string[],
+  name: string,
+  nextName: string | null,
+): string[] {
+  if (nextName === null || groupOrder.includes(nextName)) {
+    return groupOrder.filter((entry) => entry !== name);
+  }
+  return groupOrder.map((entry) => (entry === name ? nextName : entry));
 }
 
 export type SidebarListItem =
@@ -146,23 +214,31 @@ export function sidebarListItemId(item: SidebarListItem): string {
 /** The section a slot belongs to, read off the markers around it: from
     the top down, everything before the pinned divider is pinned, then the
     inbox until the snoozed header, the shelf until the settled header,
-    then settled. */
-function sectionAtSidebarSlot(items: readonly SidebarListItem[], index: number): SidebarSection {
+    then settled. Inside the inbox, the last group header above the slot
+    names its group. */
+function sidebarSlotAt(
+  items: readonly SidebarListItem[],
+  index: number,
+): { readonly section: SidebarSection; readonly group: string | null } {
   let section: SidebarSection = "pinned";
+  let group: string | null = null;
   for (let i = 0; i < index && i < items.length; i += 1) {
     const item = items[i]!;
     if (item.kind !== "marker") continue;
     if (item.marker === "pinned-divider") section = "active";
     else if (item.marker === "snoozed-header") section = "snoozed";
     else if (item.marker === "settled-header") section = "settled";
+    else group = sidebarMarkerGroup(item.marker) ?? group;
   }
-  return section;
+  return { section, group: section === "active" ? group : null };
 }
 
 /** Resolve the destination section and manual order from an arrayMove across
  * the separators. The snoozed shelf is never a destination. */
 export type SidebarDropTarget = {
   readonly section: "pinned" | "active" | "settled";
+  /** The active group run the slot sits in; null above the first group header. */
+  readonly group: string | null;
   readonly pinnedOrder: readonly string[];
   readonly activeOrder: readonly string[];
 };
@@ -177,7 +253,7 @@ export function resolveSidebarDropTarget(
   if (activeIndex === -1 || overIndex === -1 || items[activeIndex]?.kind !== "thread") return null;
   const moved = items.filter((_, index) => index !== activeIndex);
   moved.splice(overIndex, 0, items[activeIndex]!);
-  const section = sectionAtSidebarSlot(moved, overIndex);
+  const { section, group } = sidebarSlotAt(moved, overIndex);
   if (section === "snoozed") return null;
   const pinnedOrder: string[] = [];
   const activeOrder: string[] = [];
@@ -189,7 +265,7 @@ export function resolveSidebarDropTarget(
     } else if (currentSection === "pinned") pinnedOrder.push(item.key);
     else activeOrder.push(item.key);
   }
-  return { section, pinnedOrder, activeOrder };
+  return { section, group, pinnedOrder, activeOrder };
 }
 
 export type SidebarThreadDropPlan =
@@ -216,6 +292,8 @@ export type SidebarThreadDropPlan =
       readonly unpin: boolean;
       readonly unsettle: boolean;
       readonly unsnooze: boolean;
+      /** Present when the drop lands in another group's run (null: ungrouped). */
+      readonly groupName?: string | null;
     }
   | { readonly kind: "settle" };
 
@@ -251,6 +329,12 @@ export function planSidebarThreadDrop(input: {
   readonly activeOrder: readonly string[];
   readonly activeKeysById: ReadonlyMap<string, string | null | undefined>;
   readonly activeReorderableKeys?: ReadonlySet<string>;
+  /** Current group of every thread; absent entries are ungrouped. */
+  readonly groupsById?: ReadonlyMap<string, string | null | undefined>;
+  /** False when the dragged thread's server cannot change its group. */
+  readonly supportsGroups?: boolean;
+  /** A collapsed group hides where a drop would land, so it takes none. */
+  readonly collapsedGroups?: ReadonlySet<string>;
 }): SidebarThreadDropPlan {
   const {
     activeKey,
@@ -264,6 +348,7 @@ export function planSidebarThreadDrop(input: {
     activeOrder,
     activeKeysById,
     activeReorderableKeys,
+    groupsById,
   } = input;
   if (input.supportsSettlement === false && (target.section === "settled" || activeSettled)) {
     return { kind: "none" };
@@ -271,15 +356,27 @@ export function planSidebarThreadDrop(input: {
   switch (target.section) {
     case "active": {
       const order = target.activeOrder;
+      const groupOf = (key: string) => groupsById?.get(key) ?? null;
+      const regroup = target.group !== groupOf(activeKey);
       if (
+        regroup &&
+        (input.supportsGroups === false ||
+          (target.group !== null && input.collapsedGroups?.has(target.group) === true))
+      ) {
+        return { kind: "none" };
+      }
+      if (
+        !regroup &&
         activeSection === "active" &&
         order.length === activeOrder.length &&
         order.every((key, index) => key === activeOrder[index])
       ) {
         return { kind: "none" };
       }
+      // Groups render as separate runs, so only neighbors in the landing
+      // run constrain the key; every other row's key stays reserved.
       const assignments = planPinnedReorder({
-        orderedIds: order,
+        orderedIds: order.filter((key) => key === activeKey || groupOf(key) === target.group),
         keysById: activeKeysById,
         movedId: activeKey,
       });
@@ -293,6 +390,7 @@ export function planSidebarThreadDrop(input: {
         unpin: activePinned,
         unsettle: activeSettled,
         unsnooze: activeSection === "snoozed",
+        ...(regroup ? { groupName: target.group } : {}),
       };
     }
     case "settled":
@@ -340,13 +438,20 @@ export function applySidebarThreadDrop<
     | "pinnedAt"
     | "pinOrderKey"
     | "activeOrderKey"
+    | "groupName"
     | "snoozedAt"
     | "snoozedUntil"
     | "settledAt"
     | "settledOverride"
     | "unsettledAt"
   >,
->(thread: T, section: "pinned" | "active" | "settled", now: string, orderKey?: string): T {
+>(
+  thread: T,
+  section: "pinned" | "active" | "settled",
+  now: string,
+  orderKey?: string,
+  groupName?: string | null,
+): T {
   const wasSettled = thread.settledOverride === "settled";
   const awake = { ...thread, snoozedAt: null, snoozedUntil: null };
   if (section === "settled") {
@@ -368,6 +473,7 @@ export function applySidebarThreadDrop<
     pinnedAt: section === "pinned" ? (thread.pinnedAt ?? now) : null,
     pinOrderKey: section === "pinned" ? (orderKey ?? thread.pinOrderKey) : null,
     ...(section === "active" && orderKey !== undefined ? { activeOrderKey: orderKey } : {}),
+    ...(section === "active" && groupName !== undefined ? { groupName } : {}),
   };
 }
 

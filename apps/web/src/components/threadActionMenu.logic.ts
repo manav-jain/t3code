@@ -1,12 +1,16 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
 
+/** "Move to group" choices: an existing group by name, a new one, or out. */
+export type ThreadGroupMenuId = `group:${string}` | "new-group" | "remove-from-group";
+
 /**
  * Ids for the per-thread action menu. Snooze presets are dispatched as
  * `snooze:<presetId>` so the union stays closed while the preset list
  * remains data-driven.
  */
 export type ThreadActionMenuId =
+  | ThreadGroupMenuId
   | "new-thread-on-branch"
   | "filter-by-project"
   | "project-settings"
@@ -17,6 +21,7 @@ export type ThreadActionMenuId =
   | "snooze"
   | `snooze:${string}`
   | "unsnooze"
+  | "move-to-group"
   | "rename"
   | "regenerate-title"
   | "mark-unread"
@@ -43,6 +48,9 @@ export interface ThreadActionMenuState {
   readonly isSnoozed: boolean;
   readonly canSnoozeNow: boolean;
   readonly isRegeneratingTitle: boolean;
+  readonly groupName: string | null;
+  /** Existing group names in display order. */
+  readonly groupNames: ReadonlyArray<string>;
   /** Archive rejects a thread with an active turn, so disable it here rather than let the action fail. */
   readonly isRunning: boolean;
   readonly supports: {
@@ -50,8 +58,38 @@ export interface ThreadActionMenuState {
     readonly snooze: boolean;
     readonly pinning: boolean;
     readonly titleRegeneration: boolean;
+    readonly groups: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
+}
+
+/** The "Move to group" submenu, shared by the row, header and bulk menus. */
+export function buildThreadGroupMenuItems(input: {
+  /** The selection's common group, disabled in the list; null for none. */
+  readonly current: string | null;
+  readonly groupNames: ReadonlyArray<string>;
+  readonly canRemove: boolean;
+}): Array<ContextMenuItem<ThreadGroupMenuId>> {
+  return [
+    ...input.groupNames.map((name) => ({
+      id: `group:${name}` as const,
+      label: name,
+      disabled: name === input.current,
+    })),
+    { id: "new-group", label: "New group…", separatorBefore: input.groupNames.length > 0 },
+    ...(input.canRemove ? [{ id: "remove-from-group" as const, label: "Remove from group" }] : []),
+  ];
+}
+
+/** The group a "Move to group" pick assigns (null removes the thread from
+    its group); undefined for other ids and for a cancelled "New group…". */
+export async function resolveThreadGroupMenuPick(
+  id: string,
+  requestNewName: () => Promise<string | null>,
+): Promise<string | null | undefined> {
+  if (id === "remove-from-group") return null;
+  if (id === "new-group") return (await requestNewName()) ?? undefined;
+  return id.startsWith("group:") ? id.slice("group:".length) : undefined;
 }
 
 /**
@@ -106,6 +144,20 @@ export function buildThreadActionMenuItems(
                   { id: "snooze:custom" as const, label: "Custom…", separatorBefore: true },
                 ],
               },
+        ]
+      : []),
+    ...(state.supports.groups
+      ? [
+          {
+            id: "move-to-group" as const,
+            label: "Move to group",
+            icon: "folder",
+            children: buildThreadGroupMenuItems({
+              current: state.groupName,
+              groupNames: state.groupNames,
+              canRemove: state.groupName !== null,
+            }),
+          },
         ]
       : []),
     { id: "rename", label: "Rename thread", icon: "pencil", separatorBefore: true },

@@ -224,6 +224,46 @@ describe("sidebar collision detection", () => {
     ).toEqual([]);
   });
 
+  it("lands a lifted group header only relative to other group headers", () => {
+    const items = [
+      pinnedHeader,
+      divider,
+      thread("u1", "active"),
+      marker("group:A"),
+      thread("a1", "active"),
+      marker("group:B"),
+      thread("b1", "active"),
+      settledHeader,
+    ];
+    const activeId = sidebarMarkerId("group:B");
+    const { rects } = layout(items, activeId, "u1");
+    // The lifted header sits over the ungrouped row, which is the nearest target.
+    const collisionRect = rects[2]!;
+    const args = {
+      active: {
+        id: activeId,
+        data: { current: {} },
+        rect: { current: { initial: rects[5]!, translated: collisionRect } },
+      },
+      collisionRect,
+      droppableRects: new Map(items.map((item, index) => [sidebarListItemId(item), rects[index]!])),
+      droppableContainers: items.map((item, index) => ({
+        id: sidebarListItemId(item),
+        key: sidebarListItemId(item),
+        disabled: false,
+        data: { current: {} },
+        node: { current: null },
+        rect: { current: rects[index]! },
+      })),
+      pointerCoordinates: null,
+    } satisfies Parameters<CollisionDetection>[0];
+    expect(closestCenter(args)[0]?.id).toBe("u1");
+    expect(createSidebarCollisionDetection(() => true)(args).map(({ id }) => id)).toEqual([
+      sidebarMarkerId("group:A"),
+      activeId,
+    ]);
+  });
+
   it("validates each hovered target once and always allows returning to the source", () => {
     const args = collisionArgs();
     const isValid = vi.fn((id: string) => id !== "blocked");
@@ -309,6 +349,61 @@ describe("sidebar drag projection", () => {
       if (index === args.activeIndex) continue;
       expect(strategy({ ...args, index })).toEqual(verticalListSortingStrategy({ ...args, index }));
     }
+  });
+
+  it("opens the gap inside the group run the thread will join", () => {
+    const work = sidebarMarkerId("group:Work");
+    const items = [
+      pinnedHeader,
+      divider,
+      marker("active-placeholder"),
+      thread("u1", "active"),
+      marker("group:Work"),
+      thread("w1", "active"),
+      thread("w2", "active"),
+      settledHeader,
+      marker("settled-placeholder"),
+    ];
+    const result = preview({ items, settledOrder: [], settledExpanded: false }, "u1", "w1");
+    const { rects } = layout(items, "u1", "w1");
+    const top = (id: string) =>
+      rects[items.findIndex((item) => sidebarListItemId(item) === id)]!.top + result.get(id)!.y;
+    expect(result.get(work)?.scaleY).toBe(1);
+    expect(top(work)).toBeLessThan(top("w1"));
+    // One card of room opens between w1 and w2, under the Work header.
+    expect(top("w2") - top("w1")).toBeGreaterThan(2 * 82);
+  });
+
+  it("moves a lifted group's rows with it and leaves the rest in place", () => {
+    const items = [
+      pinnedHeader,
+      divider,
+      marker("active-placeholder"),
+      thread("u1", "active"),
+      marker("group:A"),
+      thread("a1", "active"),
+      marker("group:B"),
+      thread("b1", "active"),
+      thread("b2", "active"),
+      settledHeader,
+      marker("settled-placeholder"),
+    ];
+    const groupA = sidebarMarkerId("group:A");
+    const groupB = sidebarMarkerId("group:B");
+    const result = preview({ items, settledOrder: [], settledExpanded: false }, groupB, groupA);
+    const { rects } = layout(items, groupB, groupA);
+    const top = (id: string) =>
+      rects[items.findIndex((item) => sidebarListItemId(item) === id)]!.top + result.get(id)!.y;
+    // B's header follows the pointer; its rows take the top of the groups.
+    expect(result.get(groupB)).toEqual(stationary);
+    expect(top("b1")).toBe(rects[4]!.top + rects[4]!.height + 1);
+    expect(top("b2")).toBeLessThan(top(groupA));
+    expect(top("a1")).toBeGreaterThan(top(groupA));
+    // The same space is used, so nothing outside the groups moves.
+    for (const id of ["u1", sidebarMarkerId("settled-header")]) {
+      expect(result.get(id)).toEqual(stationary);
+    }
+    expect(top("a1") + rects[5]!.height + 1).toBe(rects[9]!.top);
   });
 
   it("keeps the pinned header above the gap when a lower pin moves to the top", () => {
