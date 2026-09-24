@@ -36,7 +36,10 @@ import {
   resolveSidebarDropTarget,
   pinOrderKeyBetween,
   planPinnedReorder,
+  planSidebarGroupDrop,
   planSidebarThreadDrop,
+  renameInSidebarGroupOrder,
+  sidebarGroupComparator,
   sidebarGroupMarker,
   sidebarMarkerId,
   sidebarListItemId,
@@ -1383,6 +1386,71 @@ describe("sidebar thread groups", () => {
     expect(drop("u1", "w1", { supportsGroups: false })).toEqual({ kind: "none" });
     expect(drop("u1", "w1", { collapsedGroups: new Set(["Work"]) })).toEqual({ kind: "none" });
     expect(drop("w2", "w1", { supportsGroups: false }).kind).toBe("move-active");
+  });
+});
+
+describe("sidebar group order", () => {
+  const header = (name: string) => sidebarMarkerId(sidebarGroupMarker(name));
+  const drop = (groupNames: readonly string[], dragged: string, over: string | null) =>
+    planSidebarGroupDrop({
+      activeId: header(dragged),
+      overId: over === null ? null : header(over),
+      groupNames,
+    });
+
+  it("puts the device's order first, then the rest A-Z, ignoring stale names", () => {
+    const names = ["beta", "Alpha", "zeta", "Work", "delta"];
+    expect(names.toSorted(sidebarGroupComparator(["zeta", "gone", "Work"]))).toEqual([
+      "zeta",
+      "Work",
+      "Alpha",
+      "beta",
+      "delta",
+    ]);
+    expect(names.toSorted(sidebarGroupComparator([]))).toEqual([
+      "Alpha",
+      "beta",
+      "delta",
+      "Work",
+      "zeta",
+    ]);
+    // Ungrouped threads keep leading the list.
+    const runs = [null, "Work", "zeta"].toSorted(sidebarGroupComparator(["zeta"]));
+    expect(runs).toEqual([null, "zeta", "Work"]);
+  });
+
+  it("moves a dropped group before or after the header it lands on", () => {
+    const names = ["A", "B", "C", "D"];
+    expect(drop(names, "C", "A")).toEqual(["C", "A", "B", "D"]);
+    expect(drop(names, "B", "D")).toEqual(["A", "C", "D", "B"]);
+    expect(drop(names, "D", "C")).toEqual(["A", "B", "D", "C"]);
+    expect(drop(names, "A", "B")).toEqual(["B", "A", "C", "D"]);
+  });
+
+  it("changes nothing for a drop on itself, nowhere, or a thread drag", () => {
+    expect(drop(["A", "B"], "A", "A")).toBeNull();
+    expect(drop(["A", "B"], "A", null)).toBeNull();
+    expect(drop(["A", "B"], "gone", "A")).toBeNull();
+    expect(
+      planSidebarGroupDrop({ activeId: "env:thread", overId: header("A"), groupNames: ["A"] }),
+    ).toBeNull();
+  });
+
+  it("keeps groups hidden by a filter in their slots", () => {
+    // Only A and C render; B is out of scope but still a group.
+    expect(drop(["A", "B", "C"], "C", "A")).toEqual(["C", "A", "B"]);
+    expect(drop(["A", "B", "C"], "A", "C")).toEqual(["B", "C", "A"]);
+  });
+
+  it("carries a renamed group's slot and drops an ungrouped one", () => {
+    expect(renameInSidebarGroupOrder(["A", "Work", "C"], "Work", "Jobs")).toEqual([
+      "A",
+      "Jobs",
+      "C",
+    ]);
+    // Merging into an ordered group keeps that group's slot.
+    expect(renameInSidebarGroupOrder(["A", "Work", "C"], "Work", "C")).toEqual(["A", "C"]);
+    expect(renameInSidebarGroupOrder(["A", "Work"], "Work", null)).toEqual(["A"]);
   });
 });
 

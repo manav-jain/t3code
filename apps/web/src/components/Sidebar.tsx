@@ -175,6 +175,7 @@ import {
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
+  planSidebarGroupDrop,
   planSidebarThreadDrop,
   reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
@@ -187,6 +188,9 @@ import {
   shouldNavigateAfterThreadPark,
   shouldRecedeSidebarThread,
   resolveWorkingStartedAt,
+  renameInSidebarGroupOrder,
+  sidebarGroupAtId,
+  sidebarGroupComparator,
   sidebarGroupMarker,
   sidebarListItemId,
   sidebarMarkerGroup,
@@ -548,20 +552,28 @@ function SortableThreadRow(props: {
 const draftSurfaceClassName = "bg-amber-400/[0.04] hover:bg-amber-400/[0.08]";
 const draftPenClassName = "size-3 shrink-0 text-amber-600 dark:text-amber-300/80";
 
+// The lifted item is opaque so the rows beneath it never show through. The
+// row tint is translucent in dark themes and the pointer keeps the hover color
+// applied, so both the tint and the solid sidebar color stack as images.
+const liftedSidebarItemClassName =
+  "bg-[linear-gradient(var(--sidebar-row-active),var(--sidebar-row-active)),linear-gradient(var(--sidebar),var(--sidebar))] text-sidebar-foreground opacity-100 shadow-lg";
+
 // Structural list items — the section headers and the
 // empty-section placeholders — take part in the sortable list so they shift
-// with the rows and the gap can open on either side of them. They can't be
-// picked up, and a marker is the sortable `over` when the pointer is on it,
-// which resolveSidebarDropTarget turns into the section the gap sits in.
+// with the rows and the gap can open on either side of them. Only group
+// headers can be picked up (to reorder groups); a marker is the sortable
+// `over` when the pointer is on it, which resolveSidebarDropTarget turns
+// into the section the gap sits in.
 function SortableSidebarMarker(props: {
   marker: SidebarListMarker;
+  draggable?: boolean;
   className?: string;
   children?: ReactNode;
   "data-testid"?: string;
 }) {
-  const { setNodeRef, transform, transition } = useSortable({
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: sidebarMarkerId(props.marker),
-    disabled: { draggable: true },
+    disabled: { draggable: props.draggable !== true },
     animateLayoutChanges: animateSidebarLayoutChanges,
   });
   return (
@@ -569,7 +581,11 @@ function SortableSidebarMarker(props: {
       ref={setNodeRef}
       data-thread-selection-safe
       data-testid={props["data-testid"]}
-      className={cn("list-none", props.className)}
+      className={cn(
+        "list-none",
+        props.className,
+        isDragging && cn("relative z-20 rounded-md", liftedSidebarItemClassName),
+      )}
       style={{
         transform: CSS.Translate.toString(transform),
         // A newly revealed target must not slide from its hidden position.
@@ -577,8 +593,9 @@ function SortableSidebarMarker(props: {
           props.marker === "active-placeholder" || props.marker === "settled-placeholder"
             ? "none"
             : transition,
-        visibility: transform?.scaleY === 0 ? "hidden" : undefined,
+        visibility: !isDragging && transform?.scaleY === 0 ? "hidden" : undefined,
       }}
+      {...listeners}
     >
       {props.children}
     </li>
@@ -663,6 +680,8 @@ function SidebarSectionHeader(props: {
   isDropTarget?: boolean;
   toggle: { expanded: boolean; onToggle: () => void };
   onContextMenu?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  /** Group headers drag to reorder groups. */
+  draggable?: boolean;
 }) {
   const snoozed = props.marker === "snoozed-header";
   const className = cn(
@@ -695,6 +714,7 @@ function SidebarSectionHeader(props: {
   return (
     <SortableSidebarMarker
       marker={props.marker}
+      draggable={props.draggable === true}
       data-testid={`sidebar-${props.marker}`}
       className={cn("mx-0.5 h-8", props.className)}
     >
@@ -1428,12 +1448,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     isFileDragOver && "ring-1 ring-inset ring-primary/70",
     // The hover tint must not clobber an active/selected row's own surface.
     isFileDragOver && !props.isActive && !isSelected && "bg-sidebar-row-hover",
-    // The lifted row is an opaque card so the rows beneath it never show
-    // through. The row tint is translucent in dark themes and the pointer
-    // keeps the hover color applied, so both the tint and the solid sidebar
-    // color are stacked as background images.
-    props.sortable?.isDragging &&
-      "bg-[linear-gradient(var(--sidebar-row-active),var(--sidebar-row-active)),linear-gradient(var(--sidebar),var(--sidebar))] text-sidebar-foreground opacity-100 shadow-lg",
+    props.sortable?.isDragging && liftedSidebarItemClassName,
   );
   // dnd-kit props for the row root. Same bag on both variants: every row in
   // the list translates around the gap as the drag passes it.
@@ -2160,6 +2175,8 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 export default function Sidebar() {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const groupOrder = useUiStateStore((store) => store.groupOrder);
+  const setGroupOrder = useUiStateStore((store) => store.setGroupOrder);
   const threads = useThreadShells();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -2623,7 +2640,9 @@ export default function Sidebar() {
     // web and mobile from the same data.
     const sortedPinned = sortPinnedThreadsForSidebar(pinned);
     const sortedActive = sortThreadsForSidebar(active);
-    // Ungrouped threads lead the active list; each group follows as its own run.
+    // Ungrouped threads lead the active list; each group follows as its own
+    // run, in this device's group order.
+    const compareGroups = sidebarGroupComparator(groupOrder);
     const activeRuns = groupActiveThreads(
       optimisticDrop?.section !== "active" || optimisticDrop.order === null
         ? sortedActive
@@ -2632,7 +2651,7 @@ export default function Sidebar() {
             preferredIds: optimisticDrop.order,
             getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
           }),
-    );
+    ).sort((left, right) => compareGroups(left.name, right.name));
     return {
       pinnedThreads:
         optimisticDrop?.section !== "pinned" || optimisticDrop.order === null
@@ -2655,7 +2674,15 @@ export default function Sidebar() {
       settledThreads: sortSettledThreadsForSidebar(settled),
       snoozeNow: preciseNow,
     };
-  }, [nowMinute, optimisticDrop, scopedProjectKeys, serverConfigs, snoozeWakeTick, threads]);
+  }, [
+    groupOrder,
+    nowMinute,
+    optimisticDrop,
+    scopedProjectKeys,
+    serverConfigs,
+    snoozeWakeTick,
+    threads,
+  ]);
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
@@ -3240,12 +3267,16 @@ export default function Sidebar() {
     readonly targetGroup?: string | null;
   } | null>(null);
   const dragTargetSection = dragState?.targetSection ?? null;
+  // A lifted group header. Group drags reorder groups locally and carry no
+  // thread drag state.
+  const [draggedGroup, setDraggedGroup] = useState<string | null>(null);
   const dragSensorRef = useRef<SidebarPointerSensor | null>(null);
   const finishThreadDrag = useCallback((started: boolean) => {
     dragSensorRef.current = null;
     if (started) {
       listMotionRef.current?.release();
       setDragState(null);
+      setDraggedGroup(null);
     }
   }, []);
   const attachDragSensor = useCallback((sensor: SidebarPointerSensor) => {
@@ -3414,9 +3445,16 @@ export default function Sidebar() {
     (event: DragStartEvent) => {
       const activeKey = String(event.active.id);
       const activeSection = sectionByThreadKey.get(activeKey);
-      if (activeSection === undefined) return;
+      const group = sidebarGroupAtId(activeKey);
+      if (activeSection === undefined && group === null) return;
       // Stop normal section motion before dnd-kit measures the picked-up row.
       listMotionRef.current?.suspend();
+      if (activeSection === undefined) {
+        // Group drags open no section labels to keep clear of.
+        dragLabelOffsetRef.current = 0;
+        setDraggedGroup(group);
+        return;
+      }
       const list = threadListRef.current;
       const header = list?.querySelector<HTMLElement>('[data-testid="sidebar-pinned-header"]');
       if (list && header) {
@@ -3487,13 +3525,19 @@ export default function Sidebar() {
   ]);
   useEffect(() => {
     if (
-      dragState !== null &&
-      !sidebarListItems.some((item) => item.kind === "thread" && item.key === dragState.activeKey)
+      (dragState !== null &&
+        !sidebarListItems.some(
+          (item) => item.kind === "thread" && item.key === dragState.activeKey,
+        )) ||
+      (draggedGroup !== null &&
+        !sidebarListItems.some(
+          (item) => item.kind === "marker" && sidebarMarkerGroup(item.marker) === draggedGroup,
+        ))
     ) {
       cancelThreadDrag();
     }
-  }, [cancelThreadDrag, dragState, sidebarListItems]);
-  const listMotionPaused = dragState !== null;
+  }, [cancelThreadDrag, dragState, draggedGroup, sidebarListItems]);
+  const listMotionPaused = dragState !== null || draggedGroup !== null;
   // Every shell event rebuilds sidebarListItems, but rows only move when the
   // rendered order or a row's section changes. Keying the motion pass on that
   // keeps ordinary updates from forcing a layout read and animating rows
@@ -3653,6 +3697,15 @@ export default function Sidebar() {
   const handleThreadDragEnd = useCallback(
     (event: DragEndEvent) => {
       const activeKey = String(event.active.id);
+      const nextGroupOrder = planSidebarGroupDrop({
+        activeId: activeKey,
+        overId: event.over === null ? null : String(event.over.id),
+        groupNames: listThreadGroupNames(threads).sort(sidebarGroupComparator(groupOrder)),
+      });
+      if (nextGroupOrder !== null) {
+        setGroupOrder(nextGroupOrder);
+        return;
+      }
       const activeSection = sectionByThreadKey.get(activeKey);
       const target =
         event.over === null
@@ -3806,6 +3859,7 @@ export default function Sidebar() {
     [
       activeKeysById,
       collapsedGroups,
+      groupOrder,
       groupsById,
       pinnedKeysById,
       serverConfigs,
@@ -3818,10 +3872,12 @@ export default function Sidebar() {
       reorderPinnedThread,
       reorderActiveThread,
       sectionByThreadKey,
+      setGroupOrder,
       setThreadGroup,
       settleThread,
       sidebarListItems,
       threadByKey,
+      threads,
       unpinThread,
       unsettleThread,
       unsnoozeThread,
@@ -3960,9 +4016,12 @@ export default function Sidebar() {
             ? [...names.filter((candidate) => candidate !== name), ...(nextName ? [nextName] : [])]
             : names,
         );
+        setGroupOrder(
+          renameInSidebarGroupOrder(useUiStateStore.getState().groupOrder, name, nextName),
+        );
       })();
     },
-    [attemptSetThreadGroup, setCollapsedGroupNames],
+    [attemptSetThreadGroup, setCollapsedGroupNames, setGroupOrder],
   );
 
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
@@ -4048,7 +4107,9 @@ export default function Sidebar() {
                     label: `Move to group (${count})`,
                     children: buildThreadGroupMenuItems({
                       current: selectedGroups.size === 1 ? [...selectedGroups][0]! : null,
-                      groupNames: listThreadGroupNames(readThreadShells()),
+                      groupNames: listThreadGroupNames(readThreadShells()).sort(
+                        sidebarGroupComparator(useUiStateStore.getState().groupOrder),
+                      ),
                       canRemove: selectedThreads.some((thread) => thread.groupName != null),
                     }),
                   },
@@ -4288,7 +4349,11 @@ export default function Sidebar() {
               canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
               isRegeneratingTitle,
               groupName: thread.groupName ?? null,
-              groupNames: supportsGroups ? listThreadGroupNames(readThreadShells()) : [],
+              groupNames: supportsGroups
+                ? listThreadGroupNames(readThreadShells()).sort(
+                    sidebarGroupComparator(useUiStateStore.getState().groupOrder),
+                  )
+                : [],
               isRunning:
                 thread.session?.status === "running" && thread.session.activeTurnId != null,
               supports: {
@@ -5014,6 +5079,9 @@ export default function Sidebar() {
                         );
                       };
                       const from = dragState?.activeSection ?? null;
+                      const groupHeaderCount = renderedActiveRuns.filter(
+                        (run) => run.name !== null,
+                      ).length;
                       const items: ReactNode[] = [
                         <SidebarDraftBlock
                           key="draft-sessions"
@@ -5138,6 +5206,8 @@ export default function Sidebar() {
                                 isDropTarget={
                                   dragTargetSection === "active" && dragState?.targetGroup === name
                                 }
+                                // Like rows, pickup waits for a held thread drop.
+                                draggable={groupHeaderCount > 1 && optimisticDrop === null}
                                 toggle={{
                                   expanded: !collapsedGroups.has(name),
                                   onToggle: () => toggleGroupCollapsed(name),

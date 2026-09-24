@@ -2,6 +2,7 @@ import { closestCenter, type CollisionDetection, type Modifier } from "@dnd-kit/
 import { verticalListSortingStrategy, type SortingStrategy } from "@dnd-kit/sortable";
 import {
   resolveSidebarDropTarget,
+  sidebarGroupAtId,
   sidebarListItemId,
   sidebarMarkerGroup,
   sidebarMarkerId,
@@ -40,6 +41,16 @@ export function createSidebarCollisionDetection(
   let previousPointerY = options.activationY;
   let boundarySection: "pinned" | "active" | undefined;
   return (args) => {
+    // A lifted group header only ever lands before or after another group
+    // header (or back on itself), never among thread rows.
+    if (sidebarGroupAtId(String(args.active.id)) !== null) {
+      return closestCenter({
+        ...args,
+        droppableContainers: args.droppableContainers.filter(
+          (container) => sidebarGroupAtId(String(container.id)) !== null,
+        ),
+      });
+    }
     let collisions = closestCenter(args);
     const pointer = args.pointerCoordinates;
     const items = options.items;
@@ -113,8 +124,36 @@ export function createSidebarSortingStrategy(input: {
   let previous: Pick<Layout, "rects" | "activeIndex" | "overIndex"> | undefined;
   let transforms: ReturnType<SortingStrategy>[] | null = [];
 
-  function project({ rects, activeIndex, overIndex }: Layout) {
+  /** A group drag moves the header together with its rows as one block among
+      the other group blocks; everything outside the groups stays put. */
+  function projectGroupDrag({ rects, activeIndex, overIndex }: Layout) {
+    const blocks: number[][] = [];
+    for (const [index, item] of items.entries()) {
+      if (item.kind === "marker" && sidebarMarkerGroup(item.marker) !== null) blocks.push([index]);
+      else if (item.kind === "thread" && item.section === "active") blocks.at(-1)?.push(index);
+    }
+    const from = blocks.findIndex((block) => block[0] === activeIndex);
+    const to = blocks.findIndex((block) => block[0] === overIndex);
+    const firstRect = blocks[0] === undefined ? undefined : rects[blocks[0][0]!];
+    if (from === -1 || to === -1 || !firstRect) return [];
+    const order = blocks.filter((_, index) => index !== from);
+    order.splice(to, 0, blocks[from]!);
+    const result = items.map(() => stationary);
+    let top = firstRect.top;
+    for (const index of order.flat()) {
+      const rect = rects[index];
+      if (!rect) continue;
+      result[index] = { ...stationary, y: top - rect.top };
+      top += rect.height + 1;
+    }
+    result[activeIndex] = stationary;
+    return result;
+  }
+
+  function project(layout: Layout) {
+    const { rects, activeIndex, overIndex } = layout;
     const active = items[activeIndex];
+    if (active?.kind === "marker") return projectGroupDrag(layout);
     const over = items[overIndex] ?? active;
     if (active?.kind !== "thread" || !over || !rects[0]) return [];
     const target = resolveSidebarDropTarget(items, active.key, sidebarListItemId(over));
