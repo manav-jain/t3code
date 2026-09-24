@@ -36,3 +36,20 @@ export function parseSlackThreadUrl(input: string): SlackThreadKey | null {
 export function slackThreadKeysEqual(left: SlackThreadKey, right: SlackThreadKey): boolean {
   return left.channelId === right.channelId && left.threadTs === right.threadTs;
 }
+
+const URL_IN_TEXT = /https:\/\/[^\s<>()[\]"'`]+/g;
+
+/** Each distinct Slack thread a message's text links to, with the link as written. */
+export function findSlackThreadLinks(
+  text: string,
+): Array<SlackThreadKey & { readonly url: string }> {
+  const links: Array<SlackThreadKey & { readonly url: string }> = [];
+  for (const [match] of text.matchAll(URL_IN_TEXT)) {
+    const url = match.replace(/[.,;:!?]+$/, "");
+    const key = parseSlackThreadUrl(url);
+    if (key !== null && !links.some((link) => slackThreadKeysEqual(link, key))) {
+      links.push({ ...key, url });
+    }
+  }
+  return links;
+}

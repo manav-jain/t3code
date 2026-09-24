@@ -120,8 +120,9 @@ The linked pull request participates in automatic settlement.
 
 ## Link a Slack thread
 
-Keep the Slack discussion behind a thread next to it. On web and desktop, use
-**Link Slack thread to thread** in the command palette, the **Slack threads**
+Keep the Slack discussion behind a thread next to it. A Slack thread link in a
+message you send links that thread automatically, from any device. On web and
+desktop you can also use **Link Slack thread to thread** in the command palette, the **Slack threads**
 panel, or right-click a Slack link in the conversation and choose **Link to
 thread**. Paste any message link from the thread; a reply's link works too.
 Agents can link and read Slack threads with the `link_slack_thread` and
