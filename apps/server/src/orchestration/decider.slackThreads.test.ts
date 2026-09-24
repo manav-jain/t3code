@@ -97,4 +97,59 @@ it.layer(NodeServices.layer)("slack thread link decider", (it) => {
       expect(missing._tag).toBe("OrchestrationCommandInvariantError");
     }),
   );
+
+  it.effect("links the Slack threads a user's message mentions, once each", () =>
+    Effect.gen(function* () {
+      const other = "https://acme.slack.com/archives/C0999/p1700000000000100";
+      const linked = yield* decideAndProject(readModel, {
+        type: "thread.slack-thread.link",
+        commandId: "link",
+        threadId: THREAD_ID,
+        ...KEY,
+        url: "https://acme.slack.com/archives/C0123ABC/p1712345678123456",
+        source: "agent",
+      });
+      const sent = yield* decideAndProject(linked, {
+        type: "thread.turn.start",
+        commandId: "turn",
+        threadId: THREAD_ID,
+        message: {
+          messageId: "message-1",
+          role: "user",
+          text: `Fix this: ${other}. Context in https://acme.slack.com/archives/C0123ABC/p1712345678123456 and ${other}`,
+          attachments: [],
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        createdAt: NOW,
+      });
+      expect(sent.threads[0]!.slackThreads).toEqual([
+        expect.objectContaining({ ...KEY, source: "agent" }),
+        {
+          channelId: "C0999",
+          threadTs: "1700000000.000100",
+          url: other,
+          source: "manual",
+          linkedAt: NOW,
+        },
+      ]);
+
+      const appended = yield* decideAndProject(readModel, {
+        type: "thread.message.user.append",
+        commandId: "append",
+        threadId: THREAD_ID,
+        message: { messageId: "message-2", text: `see ${other}`, attachments: [] },
+        createdAt: NOW,
+      });
+      expect(appended.threads[0]!.slackThreads).toEqual([
+        {
+          channelId: "C0999",
+          threadTs: "1700000000.000100",
+          url: other,
+          source: "manual",
+          linkedAt: NOW,
+        },
+      ]);
+    }),
+  );
 });
