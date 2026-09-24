@@ -41,6 +41,8 @@ import {
   type OrchestrationEvent,
   type OrchestrationShellStreamEvent,
   type OrchestrationShellStreamItem,
+  type OrchestrationThreadShell,
+  SlackThreadReadError,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
   OrchestrationSearchThreadsError,
@@ -82,6 +84,7 @@ import {
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { slackThreadKeysEqual } from "@t3tools/shared/slackThreadUrl";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
@@ -2788,10 +2791,22 @@ const makeWsRpcLayer = (
               "rpc.aggregate": "pull-requests",
             },
           ),
-        [WS_METHODS.slackThreadRead]: (input) =>
-          observeRpcEffect(WS_METHODS.slackThreadRead, slackThreads.read(input), {
-            "rpc.aggregate": "slack",
-          }),
+        [WS_METHODS.slackThreadRead]: ({ threadId, ...key }) =>
+          observeRpcEffect(
+            WS_METHODS.slackThreadRead,
+            // The token can read far more than any client may, so read-only
+            // devices are limited to threads already linked to a T3 thread.
+            projectionSnapshotQuery.getThreadShellById(threadId).pipe(
+              Effect.orElseSucceed(() => Option.none<OrchestrationThreadShell>()),
+              Effect.flatMap((thread) =>
+                Option.isSome(thread) &&
+                (thread.value.slackThreads ?? []).some((link) => slackThreadKeysEqual(link, key))
+                  ? slackThreads.read(key)
+                  : Effect.fail(new SlackThreadReadError({ code: "not_linked" })),
+              ),
+            ),
+            { "rpc.aggregate": "slack" },
+          ),
         [WS_METHODS.pullRequestsLinkedThreads]: (input) =>
           observeRpcEffect(
             WS_METHODS.pullRequestsLinkedThreads,

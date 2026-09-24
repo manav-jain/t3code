@@ -49,7 +49,11 @@ function SlackThreadRow({
     requested && canRead
       ? threadEnvironment.slackThread({
           environmentId: threadRef.environmentId,
-          input: { channelId: link.channelId, threadTs: link.threadTs },
+          input: {
+            threadId: threadRef.threadId,
+            channelId: link.channelId,
+            threadTs: link.threadTs,
+          },
         })
       : null,
   );

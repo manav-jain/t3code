@@ -628,7 +628,12 @@ function DeviceIntegrationSettings() {
 
 function SlackIntegrationSettings() {
   const { environment: selected } = useSettingsScope();
-  if (selected?.connection.phase !== "connected" || selected.serverConfig === null) return null;
+  if (
+    selected?.connection.phase !== "connected" ||
+    selected.serverConfig === null ||
+    selected.serverConfig.environment.capabilities.threadSlackThreads !== true
+  )
+    return null;
   return (
     <SettingsSection {...searchableSetting("slack")}>
       <SlackTokenRow

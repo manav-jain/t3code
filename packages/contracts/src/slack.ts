@@ -18,6 +18,7 @@ export type SlackThreadReadResult = typeof SlackThreadReadResult.Type;
 
 const SLACK_ERROR_MESSAGES: Record<string, string> = {
   not_configured: "Add a Slack token in Settings → Integrations to read Slack threads.",
+  not_linked: "This Slack thread is not linked to the thread.",
   request_failed: "Slack could not be reached.",
   not_in_channel: "The Slack token cannot see this channel.",
   channel_not_found: "The Slack token cannot see this channel.",
@@ -30,7 +31,7 @@ const SLACK_ERROR_MESSAGES: Record<string, string> = {
   ratelimited: "Slack is rate limiting requests. Try again shortly.",
 };
 
-/** `code` is Slack's own error code, or `not_configured` / `request_failed`. */
+/** `code` is Slack's own error code, or `not_configured` / `not_linked` / `request_failed`. */
 export class SlackThreadReadError extends Schema.TaggedError<SlackThreadReadError>()(
   "SlackThreadReadError",
   { code: Schema.String },
