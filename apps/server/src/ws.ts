@@ -102,6 +102,7 @@ import {
 } from "./orchestration/Normalizer.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProviderMcp from "./provider/mcp/ProviderMcp.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
 import {
   observeRpcEffect as instrumentRpcEffect,
@@ -569,6 +570,7 @@ const makeWsRpcLayer = (
       const providerSessionDirectory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const providerAuth = yield* ProviderAuthService;
+      const providerMcp = yield* ProviderMcp.ProviderMcp;
       const providerInstances = yield* ProviderInstanceRegistry;
       const providerInstallation = yield* makeProviderInstallation();
       const serverUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
@@ -2520,6 +2522,22 @@ const makeWsRpcLayer = (
           ),
         [WS_METHODS.providerAuthLogout]: (input) =>
           observeRpcEffect(WS_METHODS.providerAuthLogout, providerAuth.logout(input), {
+            "rpc.aggregate": "provider",
+          }),
+        [WS_METHODS.providerMcpList]: (input) =>
+          observeRpcEffect(WS_METHODS.providerMcpList, providerMcp.list(input), {
+            "rpc.aggregate": "provider",
+          }),
+        [WS_METHODS.providerMcpUpdate]: (input) =>
+          observeRpcEffect(WS_METHODS.providerMcpUpdate, providerMcp.update(input), {
+            "rpc.aggregate": "provider",
+          }),
+        [WS_METHODS.providerMcpSignIn]: (input) =>
+          observeRpcEffect(WS_METHODS.providerMcpSignIn, providerMcp.signIn(input), {
+            "rpc.aggregate": "provider",
+          }),
+        [WS_METHODS.providerMcpFinishSignIn]: (input) =>
+          observeRpcEffect(WS_METHODS.providerMcpFinishSignIn, providerMcp.finishSignIn(input), {
             "rpc.aggregate": "provider",
           }),
         [WS_METHODS.providerAuthSubscribe]: (input) =>

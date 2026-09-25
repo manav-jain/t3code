@@ -387,6 +387,8 @@ interface ProviderInstanceCardProps {
    */
   readonly headerAction?: ReactNode | undefined;
   readonly setup?: ReactNode;
+  /** The instance's MCP servers, when its environment and driver can manage them. */
+  readonly mcp?: ReactNode;
   readonly hiddenModels: ReadonlyArray<string>;
   readonly favoriteModels: ReadonlyArray<string>;
   readonly modelOrder: ReadonlyArray<string>;
@@ -430,6 +432,7 @@ export function ProviderInstanceCard({
   onDelete,
   headerAction,
   setup,
+  mcp,
   hiddenModels,
   favoriteModels,
   modelOrder,
@@ -975,6 +978,8 @@ export function ProviderInstanceCard({
           </div>
         </SettingsSection>
       ) : null}
+
+      {mcp ? <SettingsSection title="MCP servers">{mcp}</SettingsSection> : null}
     </>
   );
 }

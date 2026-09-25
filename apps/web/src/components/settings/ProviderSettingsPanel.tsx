@@ -83,6 +83,7 @@ import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
 import { ExpandableText } from "./ExpandableText";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { UsageProviderSettings } from "./UsageProviderSettings";
+import { ProviderMcpSection } from "./ProviderMcpSection";
 import { ProviderSetupSection, readAntigravityAuthMethod } from "./ProviderSetupSection";
 import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
 import { searchableSetting } from "./settingsSearch";
@@ -927,6 +928,15 @@ export function EnvironmentProviderSettings({
               enabled={resolveProviderInstanceEnabled(row.instance)}
               readOnly={readOnly}
               onEnable={() => updateProviderInstance(row, { ...row.instance, enabled: true })}
+            />
+          ) : null
+        }
+        mcp={
+          mode === "editor" && liveProvider?.supportsMcpManagement === true ? (
+            <ProviderMcpSection
+              environmentId={environmentId}
+              instanceId={row.instanceId}
+              readOnly={readOnly}
             />
           ) : null
         }
