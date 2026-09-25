@@ -144,18 +144,19 @@ local time zone, or a duration in minutes, hours, or days. Durations start when
 you confirm; one day means 24 hours. On web and desktop, you can also snooze
 several selected threads together. Choose **Wake thread** to bring a thread back early.
 
-## Review today's work
+## Review your day
 
 On web and desktop, choose **Standup** at the bottom of the sidebar, or search for it in the
-command palette, to see today's threads across your connected environments:
+command palette, to see the threads you worked on across your connected environments. It opens
+on today; use the arrows beside the date, or the ← and → keys, to step through earlier days.
 
-- **Started**: created today.
-- **Closed**: settled today, or a linked pull request merged today. Threads settled
-  automatically for inactivity count on the day of their last activity, not today.
-- **Halted**: an active thread whose latest turn stopped, failed, or is waiting for your
-  approval or answer today.
+A thread counts toward a day when you created, prompted, settled, or merged it that day; today
+also includes threads still waiting on you. Each thread is **Done** (settled, or its pull request
+merged), **Blocked** (waiting for your approval or answer, or failed), or **In progress**.
 
-Above the lists, each environment writes a summary with your **Text generation** model from
-Settings. The summary is written the first time you open Standup each day. The lists keep
-updating after that; when they no longer match the summary, choose refresh to rewrite it.
-Environments running an older server show the lists without a summary.
+Above the lists, each environment writes one standup with your **Text generation** model from
+Settings, from what happened in that day's threads. It reports tasks rather than threads: threads
+that share a branch or pull request, or work toward the same goal, become one update that names
+the threads behind it. A day's standup is written the first time you open that day. Today's lists
+keep updating after that; when they no longer match the standup, choose refresh to rewrite it.
+Environments running an older server are left out.

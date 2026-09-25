@@ -102,6 +102,7 @@ import {
 } from "./orchestration/Normalizer.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import { getStandupDay } from "./standup/StandupDay.ts";
 import { generateStandupSummary } from "./standup/StandupSummary.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
@@ -3136,14 +3137,20 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.shellOpenInEditor, externalLauncher.launchEditor(input), {
             "rpc.aggregate": "workspace",
           }),
+        [WS_METHODS.standupGetDay]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.standupGetDay,
+            DateTime.now.pipe(
+              Effect.flatMap((now) => getStandupDay(input, DateTime.formatIso(now))),
+              Effect.provideService(SqlClient.SqlClient, sql),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
         [WS_METHODS.standupGenerate]: (input) =>
           observeRpcEffect(
             WS_METHODS.standupGenerate,
             generateStandupSummary(input).pipe(
-              Effect.provideService(
-                ProjectionSnapshotQuery.ProjectionSnapshotQuery,
-                projectionSnapshotQuery,
-              ),
+              Effect.provideService(SqlClient.SqlClient, sql),
               Effect.provideService(ServerSettings.ServerSettingsService, serverSettings),
               Effect.provideService(TextGeneration.TextGeneration, textGeneration),
             ),

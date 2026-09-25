@@ -5,7 +5,7 @@ import type {
   ChatAttachment,
   ModelSelection,
   ProviderInstanceId,
-  StandupBucket,
+  StandupStatus,
 } from "@t3tools/contracts";
 import { TextGenerationError } from "@t3tools/contracts";
 
@@ -83,7 +83,10 @@ export interface ThreadTitleGenerationResult {
 export interface StandupSummaryThread {
   title: string;
   projectTitle: string | undefined;
-  buckets: ReadonlyArray<StandupBucket>;
+  branch: string | null;
+  /** Linked pull requests, formatted for the prompt. They tie a task's threads together. */
+  pullRequests: ReadonlyArray<string>;
+  status: StandupStatus;
   note: string | undefined;
   /** Formatted thread history, already trimmed to its share of the prompt. */
   context: string;

@@ -1,14 +1,17 @@
 import { useAtomValue } from "@effect/atom-react";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, StandupBucket } from "@t3tools/contracts";
-import { useEffect, useEffectEvent, useMemo } from "react";
+import type { EnvironmentId, StandupDayInput, StandupStatus } from "@t3tools/contracts";
+import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { isElectron } from "../../env";
-import { useProjects, useServerConfigs, useThreadShells } from "../../state/entities";
+import { isEditableFocused } from "../../lib/editableFocus";
+import { useServerConfigs } from "../../state/entities";
 import { environmentPresentations } from "../../state/presentation";
-import { type EnvironmentStandup, standupGenerate, useStandupStore } from "../../state/standup";
+import { useEnvironmentQuery } from "../../state/query";
+import { standupDay, standupGenerate, standupKey, useStandupStore } from "../../state/standup";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import ChatMarkdown from "../ChatMarkdown";
@@ -20,112 +23,61 @@ import { Skeleton } from "../ui/skeleton";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
-import {
-  deriveStandupEntries,
-  type StandupEntry,
-  standupEntriesKey,
-  startOfLocalDay,
-  toStandupThreads,
-} from "./standup.logic";
+import { dayLabel, dayWindow, localDay, shiftDay } from "./standup.logic";
 
-const BUCKETS: ReadonlyArray<{ readonly bucket: StandupBucket; readonly title: string }> = [
-  { bucket: "closed", title: "Closed" },
-  { bucket: "halted", title: "Halted" },
-  { bucket: "started", title: "Started" },
+const STATUSES: ReadonlyArray<{ readonly status: StandupStatus; readonly title: string }> = [
+  { status: "done", title: "Done" },
+  { status: "in-progress", title: "In progress" },
+  { status: "blocked", title: "Blocked" },
 ];
 
 const timeLabel = (iso: string) =>
   new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
 /**
- * Today's threads, live from the sidebar shells, plus one written summary per
- * environment. Summaries are written once a day on open; after that the lists
- * keep moving and Refresh reconciles the summary with them.
+ * One day's standup: each environment reports the threads it saw work on that
+ * day and writes a task-level summary. ←/→ (or the arrows by the date) step
+ * through days. A day's first summary is written when it is first opened; today's
+ * lists keep moving after that, and Refresh reconciles the summary with them.
  */
 export function StandupPage() {
-  const threads = useThreadShells();
-  const projects = useProjects();
+  const search = useSearch({ from: "/standup" });
+  const navigate = useNavigate();
   const serverConfigs = useServerConfigs();
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
-  const standups = useStandupStore((state) => state.byEnvironment);
-  const updateStandup = useStandupStore((state) => state.update);
-  const generateCommand = useAtomCommand(standupGenerate, { reportFailure: false });
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
-  const dayStart = startOfLocalDay(new Date());
-  const entries = useMemo(() => deriveStandupEntries(threads, dayStart), [threads, dayStart]);
-  const entriesByEnvironment = useMemo(() => {
-    const grouped = new Map<EnvironmentId, StandupEntry[]>();
-    for (const entry of entries) {
-      const group = grouped.get(entry.thread.environmentId) ?? [];
-      group.push(entry);
-      grouped.set(entry.thread.environmentId, group);
-    }
-    return grouped;
-  }, [entries]);
-  const projectTitles = useMemo(
-    () =>
-      new Map(projects.map((project) => [`${project.environmentId}:${project.id}`, project.title])),
-    [projects],
+  const today = localDay(new Date());
+  const day = search.day !== undefined && search.day < today ? search.day : today;
+  const window = dayWindow(day);
+  const refreshing = useStandupStore((state) =>
+    Object.entries(state.byDay).some(
+      ([key, standup]) => key.endsWith(`|${window.from}`) && standup.status === "generating",
+    ),
   );
-  const multipleEnvironments = entriesByEnvironment.size > 1;
+
+  const environmentIds = [...serverConfigs]
+    .filter(([, config]) => config.environment.capabilities.standupSummary === true)
+    .map(([environmentId]) => environmentId);
   const environmentLabel = (environmentId: EnvironmentId) =>
     presentations.get(environmentId)?.entry.target.label ?? environmentId;
-  const supportsSummary = (environmentId: EnvironmentId) =>
-    serverConfigs.get(environmentId)?.environment.capabilities.standupSummary === true;
 
-  const generate = async (environmentId: EnvironmentId, group: ReadonlyArray<StandupEntry>) => {
-    const key = standupEntriesKey(group);
-    const previous = useStandupStore.getState().byEnvironment[environmentId];
-    const summary = previous?.dayStart === dayStart ? previous.summary : null;
-    updateStandup(environmentId, { dayStart, key, status: "generating", summary, error: null });
-    const result = await generateCommand({
-      environmentId,
-      input: { threads: toStandupThreads(group) },
-    });
-    // A newer request owns the entry now.
-    const latest = useStandupStore.getState().byEnvironment[environmentId];
-    if (latest?.key !== key || latest.dayStart !== dayStart) return;
-    if (result._tag === "Success") {
-      updateStandup(environmentId, {
-        dayStart,
-        key,
-        status: "ready",
-        summary: result.value,
-        error: null,
-      });
-      return;
-    }
-    const error = squashAtomCommandFailure(result);
-    updateStandup(environmentId, {
-      ...latest,
-      status: "failed",
-      error: error instanceof Error ? error.message : "Failed to write the standup.",
-    });
+  const goToDay = (next: string) => {
+    if (next > today) return;
+    void navigate({ to: "/standup", search: next === today ? {} : { day: next }, replace: true });
   };
-
-  const refreshable = useMemo(
-    () =>
-      [...entriesByEnvironment].filter(
-        ([environmentId]) =>
-          serverConfigs.get(environmentId)?.environment.capabilities.standupSummary === true,
-      ),
-    [entriesByEnvironment, serverConfigs],
-  );
-  const refreshing = refreshable.some(
-    ([environmentId]) => standups[environmentId]?.status === "generating",
-  );
-  const refresh = () => {
-    for (const [environmentId, group] of refreshable) void generate(environmentId, group);
-  };
-
-  // Write each environment's first summary of the day on open; later changes wait for Refresh.
-  const generateMissing = useEffectEvent((groups: typeof refreshable) => {
-    for (const [environmentId, group] of groups) {
-      const standup = useStandupStore.getState().byEnvironment[environmentId];
-      if (standup?.dayStart !== dayStart) void generate(environmentId, group);
-    }
+  const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.shiftKey || isEditableFocused(event.target)) return;
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    goToDay(shiftDay(day, event.key === "ArrowLeft" ? -1 : 1));
   });
-  useEffect(() => generateMissing(refreshable), [refreshable]);
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => onKeyDown(event);
+    globalThis.addEventListener("keydown", listener);
+    return () => globalThis.removeEventListener("keydown", listener);
+  }, []);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
@@ -137,19 +89,34 @@ export function StandupPage() {
                 <h1>Standup</h1>
               </WorkspaceBreadcrumbItem>
             </WorkspaceBreadcrumb>
-            <span className="truncate text-xs text-muted-foreground">
-              {new Date(dayStart).toLocaleDateString(undefined, {
-                weekday: "long",
-                month: "long",
-                day: "numeric",
-              })}
-            </span>
+            <div className="flex min-w-0 items-center gap-1">
+              <Button
+                onClick={() => goToDay(shiftDay(day, -1))}
+                aria-label="Previous day"
+                size="icon-sm"
+                variant="ghost"
+              >
+                <ChevronLeftIcon />
+              </Button>
+              <span className="min-w-24 truncate text-center text-xs text-muted-foreground">
+                {dayLabel(day, today)}
+              </span>
+              <Button
+                onClick={() => goToDay(shiftDay(day, 1))}
+                aria-label="Next day"
+                disabled={day === today}
+                size="icon-sm"
+                variant="ghost"
+              >
+                <ChevronRightIcon />
+              </Button>
+            </div>
             <div className="ms-auto">
               <Button
-                onClick={refresh}
+                onClick={() => setRefreshNonce((nonce) => nonce + 1)}
                 aria-label="Refresh standup"
                 aria-busy={refreshing}
-                disabled={refreshing || refreshable.length === 0}
+                disabled={refreshing || environmentIds.length === 0}
                 size="icon-sm"
                 variant="ghost"
               >
@@ -161,60 +128,21 @@ export function StandupPage() {
 
         <ScrollArea className="min-h-0 flex-1">
           <WorkspacePageContainer width="readable">
-            {entries.length === 0 ? (
+            {environmentIds.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                Nothing started, closed, or halted today.
+                Connect an environment running a server with Standup to see your days.
               </p>
             ) : (
-              <div className="flex flex-col gap-8">
-                {[...entriesByEnvironment.keys()].map((environmentId) => (
-                  <StandupSummarySection
-                    key={environmentId}
+              <div className="flex flex-col gap-10">
+                {environmentIds.map((environmentId) => (
+                  <StandupEnvironmentDay
+                    key={`${environmentId}|${window.from}`}
                     environmentId={environmentId}
-                    label={multipleEnvironments ? environmentLabel(environmentId) : null}
-                    supported={supportsSummary(environmentId)}
-                    standup={standups[environmentId]}
-                    currentKey={standupEntriesKey(entriesByEnvironment.get(environmentId) ?? [])}
-                    dayStart={dayStart}
+                    window={window}
+                    label={environmentIds.length > 1 ? environmentLabel(environmentId) : null}
+                    refreshNonce={refreshNonce}
                   />
                 ))}
-                {BUCKETS.map(({ bucket, title }) => {
-                  const rows = entries.filter((entry) => entry.buckets.includes(bucket));
-                  if (rows.length === 0) return null;
-                  return (
-                    <section key={bucket} className="flex flex-col gap-2">
-                      <h2 className="text-sm font-medium">
-                        {title} <span className="text-muted-foreground">{rows.length}</span>
-                      </h2>
-                      <ul className="flex flex-col">
-                        {rows.map(({ thread, note }) => (
-                          <li key={`${thread.environmentId}:${thread.id}`}>
-                            <Link
-                              to="/$environmentId/$threadId"
-                              params={buildThreadRouteParams(
-                                scopeThreadRef(thread.environmentId, thread.id),
-                              )}
-                              className="flex min-w-0 items-baseline gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent"
-                            >
-                              <span className="truncate">{thread.title}</span>
-                              <span className="shrink-0 truncate text-xs text-muted-foreground">
-                                {[
-                                  projectTitles.get(`${thread.environmentId}:${thread.projectId}`),
-                                  multipleEnvironments
-                                    ? environmentLabel(thread.environmentId)
-                                    : null,
-                                  bucket === "halted" ? note : null,
-                                ]
-                                  .filter(Boolean)
-                                  .join(" · ")}
-                              </span>
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
-                    </section>
-                  );
-                })}
               </div>
             )}
           </WorkspacePageContainer>
@@ -224,55 +152,133 @@ export function StandupPage() {
   );
 }
 
-function StandupSummarySection({
+function StandupEnvironmentDay({
   environmentId,
+  window,
   label,
-  supported,
-  standup,
-  currentKey,
-  dayStart,
+  refreshNonce,
 }: {
   readonly environmentId: EnvironmentId;
+  readonly window: StandupDayInput;
   readonly label: string | null;
-  readonly supported: boolean;
-  readonly standup: EnvironmentStandup | undefined;
-  readonly currentKey: string;
-  readonly dayStart: number;
+  readonly refreshNonce: number;
 }) {
-  const today = standup?.dayStart === dayStart ? standup : undefined;
-  const summary = today?.summary ?? null;
+  const dayQuery = useEnvironmentQuery(standupDay({ environmentId, input: window }));
+  const key = standupKey(environmentId, window.from);
+  const standup = useStandupStore((state) => state.byDay[key]);
+  const updateStandup = useStandupStore((state) => state.update);
+  const generateCommand = useAtomCommand(standupGenerate, { reportFailure: false });
+  const day = dayQuery.data;
+
+  const generate = async () => {
+    const summary = useStandupStore.getState().byDay[key]?.summary ?? null;
+    updateStandup(key, { status: "generating", summary, error: null });
+    const result = await generateCommand({ environmentId, input: window });
+    if (result._tag === "Success") {
+      updateStandup(key, { status: "ready", summary: result.value, error: null });
+      return;
+    }
+    const error = squashAtomCommandFailure(result);
+    updateStandup(key, {
+      status: "failed",
+      summary,
+      error: error instanceof Error ? error.message : "Could not write the standup.",
+    });
+  };
+
+  // A day's first standup is written the first time it is opened with work in it.
+  const writeFirstStandup = useEffectEvent(() => {
+    if ((day?.threads.length ?? 0) > 0 && !useStandupStore.getState().byDay[key]) void generate();
+  });
+  useEffect(() => writeFirstStandup(), [day]);
+
+  const handleRefresh = useEffectEvent(() => {
+    dayQuery.refresh();
+    if ((day?.threads.length ?? 0) > 0) void generate();
+  });
+  const seenNonce = useRef(refreshNonce);
+  useEffect(() => {
+    if (seenNonce.current === refreshNonce) return;
+    seenNonce.current = refreshNonce;
+    handleRefresh();
+  }, [refreshNonce]);
+
+  const summary = standup?.summary ?? null;
   return (
-    <section className="flex flex-col gap-2">
+    <section className="flex flex-col gap-6">
       {label ? <h2 className="text-sm font-medium">{label}</h2> : null}
-      {!supported ? (
-        <p className="text-sm text-muted-foreground">
-          Update this environment's server to get a written summary.
-        </p>
-      ) : summary === null && today?.status !== "failed" ? (
-        <div className="flex flex-col gap-2" aria-label="Writing standup">
-          <Skeleton className="h-4 w-2/3" />
-          <Skeleton className="h-4 w-5/6" />
-          <Skeleton className="h-4 w-1/2" />
-        </div>
+      {day === null ? (
+        dayQuery.error ? (
+          <p className="text-sm text-muted-foreground">Could not load this day: {dayQuery.error}</p>
+        ) : (
+          <StandupSkeleton />
+        )
+      ) : day.threads.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No thread work on this day.</p>
       ) : (
         <>
-          {summary ? (
-            <ChatMarkdown text={summary.summary} cwd={undefined} environmentId={environmentId} />
-          ) : null}
-          <p className="text-xs text-muted-foreground">
-            {[
-              summary ? `Written at ${timeLabel(summary.generatedAt)}` : null,
-              today?.status === "generating" ? "Updating…" : null,
-              today?.status === "ready" && today.key !== currentKey
-                ? "Threads changed since. Refresh to update."
-                : null,
-              today?.status === "failed" ? `Could not write the summary: ${today.error}` : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
+          <div className="flex flex-col gap-2">
+            {summary === null && standup?.status !== "failed" ? (
+              <StandupSkeleton />
+            ) : summary ? (
+              <ChatMarkdown text={summary.summary} cwd={undefined} environmentId={environmentId} />
+            ) : null}
+            <p className="text-xs text-muted-foreground">
+              {[
+                summary ? `Written at ${timeLabel(summary.generatedAt)}` : null,
+                standup?.status === "generating" && summary ? "Updating…" : null,
+                standup?.status === "ready" && summary && summary.key !== day.key
+                  ? "Threads changed since. Refresh to update."
+                  : null,
+                standup?.status === "failed"
+                  ? `Could not write the standup: ${standup.error}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          </div>
+          {STATUSES.map(({ status, title }) => {
+            const rows = day.threads.filter((thread) => thread.status === status);
+            if (rows.length === 0) return null;
+            return (
+              <section key={status} className="flex flex-col gap-2">
+                <h3 className="text-sm font-medium">
+                  {title} <span className="text-muted-foreground">{rows.length}</span>
+                </h3>
+                <ul className="flex flex-col">
+                  {rows.map((thread) => (
+                    <li key={thread.threadId}>
+                      <Link
+                        to="/$environmentId/$threadId"
+                        params={buildThreadRouteParams(
+                          scopeThreadRef(environmentId, thread.threadId),
+                        )}
+                        className="flex min-w-0 items-baseline gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent"
+                      >
+                        <span className="truncate">{thread.title}</span>
+                        <span className="shrink-0 truncate text-xs text-muted-foreground">
+                          {[thread.projectTitle, thread.note].filter(Boolean).join(" · ")}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            );
+          })}
         </>
       )}
     </section>
+  );
+}
+
+function StandupSkeleton() {
+  return (
+    <div className="flex flex-col gap-2" aria-label="Loading standup">
+      <Skeleton className="h-4 w-2/3" />
+      <Skeleton className="h-4 w-5/6" />
+      <Skeleton className="h-4 w-1/2" />
+    </div>
   );
 }

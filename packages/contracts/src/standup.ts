@@ -1,9 +1,9 @@
 /**
- * Standup summary contract.
+ * Standup contract.
  *
- * The client sorts the thread shells it already holds into today's buckets and
- * asks each environment to summarize its own threads. The environment reads the
- * messages itself, so thread history never crosses the wire.
+ * Each environment reports the threads it holds that saw work in a time window
+ * (normally one local day, which the client picks) and writes their standup. The
+ * environment reads its own history, so thread messages never cross the wire.
  *
  * @module standup
  */
@@ -11,31 +11,48 @@ import * as Schema from "effect/Schema";
 
 import { IsoDateTime, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
-/** Most threads one summary request may carry. */
-export const STANDUP_MAX_THREADS = 100;
+/** Where a thread stood at the end of the reported day. */
+export const StandupStatus = Schema.Literals(["done", "in-progress", "blocked"]);
+export type StandupStatus = typeof StandupStatus.Type;
 
-export const StandupBucket = Schema.Literals(["started", "closed", "halted"]);
-export type StandupBucket = typeof StandupBucket.Type;
+/** A half-open window, `from` inclusive and `to` exclusive. */
+export const StandupDayInput = Schema.Struct({
+  from: IsoDateTime,
+  to: IsoDateTime,
+});
+export type StandupDayInput = typeof StandupDayInput.Type;
 
-export const StandupThread = Schema.Struct({
+export const StandupDayThread = Schema.Struct({
   threadId: ThreadId,
-  buckets: Schema.Array(StandupBucket).check(Schema.isMinLength(1)),
-  /** Why a halted thread stopped, for example "waiting for approval". */
-  note: Schema.optional(TrimmedNonEmptyString),
+  title: TrimmedNonEmptyString,
+  projectTitle: Schema.NullOr(Schema.String),
+  status: StandupStatus,
+  /** Signals behind the status, for example "new · waiting for approval". */
+  note: Schema.NullOr(Schema.String),
 });
-export type StandupThread = typeof StandupThread.Type;
+export type StandupDayThread = typeof StandupDayThread.Type;
 
-export const StandupSummaryInput = Schema.Struct({
-  threads: Schema.Array(StandupThread).check(
-    Schema.isMinLength(1),
-    Schema.isMaxLength(STANDUP_MAX_THREADS),
-  ),
+export const StandupDay = Schema.Struct({
+  threads: Schema.Array(StandupDayThread),
+  /** Identifies the threads and statuses; a summary with another key is out of date. */
+  key: Schema.String,
 });
-export type StandupSummaryInput = typeof StandupSummaryInput.Type;
+export type StandupDay = typeof StandupDay.Type;
 
 export const StandupSummary = Schema.Struct({
   /** Markdown. */
   summary: Schema.String,
   generatedAt: IsoDateTime,
+  /** The {@link StandupDay} key the summary was written from. */
+  key: Schema.String,
 });
 export type StandupSummary = typeof StandupSummary.Type;
+
+export class StandupError extends Schema.TaggedError<StandupError>()("StandupError", {
+  detail: Schema.String,
+  cause: Schema.optional(Schema.Defect()),
+}) {
+  override get message(): string {
+    return this.detail;
+  }
+}

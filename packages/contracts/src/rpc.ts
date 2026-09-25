@@ -78,7 +78,6 @@ import {
   VcsStatusInput,
   VcsStatusResult,
   VcsStatusStreamEvent,
-  TextGenerationError,
 } from "./git.ts";
 import {
   ReviewDiffFileContentsInput,
@@ -254,7 +253,7 @@ import {
   ProviderConsumeResetCreditResult,
 } from "./providerUsageLimits.ts";
 import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
-import { StandupSummary, StandupSummaryInput } from "./standup.ts";
+import { StandupDay, StandupDayInput, StandupError, StandupSummary } from "./standup.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   ProjectCloneActionInput,
@@ -291,6 +290,7 @@ export const WS_METHODS = {
   shellOpenInEditor: "shell.openInEditor",
 
   // Standup methods
+  standupGetDay: "standup.getDay",
   standupGenerate: "standup.generate",
 
   // Filesystem methods
@@ -650,10 +650,16 @@ const WsServerGetUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetUsageSummary, {
   error: Schema.Union([EnvironmentAuthorizationError, UsageReadError]),
 });
 
+const WsStandupGetDayRpc = Rpc.make(WS_METHODS.standupGetDay, {
+  payload: StandupDayInput,
+  success: StandupDay,
+  error: Schema.Union([EnvironmentAuthorizationError, StandupError]),
+});
+
 const WsStandupGenerateRpc = Rpc.make(WS_METHODS.standupGenerate, {
-  payload: StandupSummaryInput,
+  payload: StandupDayInput,
   success: StandupSummary,
-  error: Schema.Union([EnvironmentAuthorizationError, TextGenerationError]),
+  error: Schema.Union([EnvironmentAuthorizationError, StandupError]),
 });
 
 /**
@@ -1433,6 +1439,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetResourceTelemetryHistoryRpc,
   WsServerRetryResourceTelemetryRpc,
   WsServerGetUsageSummaryRpc,
+  WsStandupGetDayRpc,
   WsStandupGenerateRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,

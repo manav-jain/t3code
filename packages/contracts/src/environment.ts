@@ -144,8 +144,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Server understands regenerateTitle on thread.meta.update. Absent on
       older servers, so clients hide the action instead of sending it. */
   threadTitleRegeneration: Schema.optionalKey(Schema.Boolean),
-  /** Server writes standup summaries through standup.generate. Absent on older
-      servers, so clients leave their threads out of the summary. */
+  /** Server reports standup days and writes their summaries (standup.getDay,
+      standup.generate). Absent on older servers, so clients leave them out. */
   standupSummary: Schema.optionalKey(Schema.Boolean),
   /** Server supports legacy linkedPullRequest updates through thread.meta.update.
       Independent of threadPullRequests; servers supporting both advertise both. */
