@@ -13,6 +13,7 @@ import type { ChatAttachment } from "@t3tools/contracts";
 
 import { limitSection } from "./TextGenerationUtils.ts";
 import type { TextGenerationPolicy } from "./TextGenerationPolicy.ts";
+import type { StandupSummaryThread } from "./TextGeneration.ts";
 
 const EARLIER_CONTENT_TRUNCATION_MARKER = "[Earlier content truncated]\n\n";
 
@@ -326,4 +327,61 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
   });
 
   return { prompt, outputSchema };
+}
+
+export interface StandupSummaryPromptInput {
+  threads: ReadonlyArray<StandupSummaryThread>;
+}
+
+/**
+ * Length rules modeled on an oncall brevity directive: lead with the outcome,
+ * cut narration, use tight bullets. Its short-reply cap is deliberately dropped,
+ * because a standup that leaves work out is wrong, not brief.
+ */
+const STANDUP_LENGTH_DIRECTIVE = `## Length
+- Account for every thread below, but report TASKS, not threads. Fold each thread into the task it served; a thread gets its own bullet only when nothing else it relates to happened today. Length follows the work, not a word cap.
+- Lead each bullet with the outcome: what got done, what is stuck and on what, or what the reader owes next.
+- Cut: restating the user's request, narrating how the agent worked, per-tool play-by-play, per-thread recaps, unasked-for caveats, and a closing summary.
+- Use tight bullets, not prose. Keep every line to one sentence at the level a teammate cares about. Leave out lists of pull request numbers, file and function names, and counts unless the reader must act on them.`;
+
+const STANDUP_STATUS_LABELS = {
+  done: "done",
+  "in-progress": "in progress",
+  blocked: "blocked",
+} as const;
+
+export function buildStandupSummaryPrompt(input: StandupSummaryPromptInput) {
+  const threads = input.threads.map((thread) =>
+    [
+      `### ${thread.title}`,
+      ...(thread.projectTitle ? [`Project: ${thread.projectTitle}`] : []),
+      ...(thread.branch ? [`Branch: ${thread.branch}`] : []),
+      ...(thread.pullRequests.length > 0
+        ? [`Pull requests: ${thread.pullRequests.join("; ")}`]
+        : []),
+      `Status: ${STANDUP_STATUS_LABELS[thread.status]}${thread.note ? ` (${thread.note})` : ""}`,
+      thread.context || "(no messages)",
+    ].join("\n"),
+  );
+  const prompt = `You write the user's standup for one day from the T3 Code threads they worked in that day.
+The user runs many agent threads in parallel, and several threads usually serve one task: one builds a feature while others fix its bugs, document it, or ship its pull requests. The standup reports tasks, not threads.
+Return a JSON object with key summary: GitHub-flavored markdown.
+
+Before writing, silently group the threads into tasks the way a teammate would hear them at standup: by the feature, product flow, or goal they serve, not by chat. Threads on different branches and pull requests belong together when they work on the same flow, product area, or initiative, such as several fixes to one checkout flow, a feature plus its docs, or several improvements to the same internal tool. Keep genuinely unrelated work apart, even inside one project. Expect noticeably fewer tasks than threads. Each thread belongs to exactly one task.
+
+Rules:
+- Use the headings "## Done", "## In progress", and "## Blocked", in that order. Skip a heading with no tasks.
+- Decide each task's status yourself from its threads' statuses and contents: Done when its work finished or shipped; Blocked when it cannot move until the user or something outside the agent acts, such as an approval, an answer, or a failure to fix; In progress otherwise. A task with one done thread and another still moving is In progress.
+- One bullet per task: the task name in bold, one sentence on where it stands overall, then the titles of the threads it drew on in italics, like _(Fix login redirect; SSO callback tests)_. Under it, at most three one-sentence sub-bullets for what matters most: what shipped, a decision, or what is left.
+- For blocked tasks, say what stopped them and what would unblock them.
+- State only what the thread contents support. Say it is unclear rather than guess, and never claim work shipped unless a thread shows it.
+- Do not invent links, ids, or numbers. Never include email addresses, phone numbers, or other personal data from the threads.
+- Before answering, check that every thread title below appears in exactly one task's italic list.
+
+${STANDUP_LENGTH_DIRECTIVE}
+
+Threads:
+
+${threads.join("\n\n")}`;
+  return { prompt, outputSchema: Schema.Struct({ summary: Schema.String }) };
 }

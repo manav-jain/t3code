@@ -1,7 +1,12 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type { ChatAttachment, ModelSelection, ProviderInstanceId } from "@t3tools/contracts";
+import type {
+  ChatAttachment,
+  ModelSelection,
+  ProviderInstanceId,
+  StandupStatus,
+} from "@t3tools/contracts";
 import { TextGenerationError } from "@t3tools/contracts";
 
 import * as ProviderInstanceRegistry from "../provider/Services/ProviderInstanceRegistry.ts";
@@ -75,6 +80,29 @@ export interface ThreadTitleGenerationResult {
   needsRefinement?: boolean | undefined;
 }
 
+export interface StandupSummaryThread {
+  title: string;
+  projectTitle: string | undefined;
+  branch: string | null;
+  /** Linked pull requests, formatted for the prompt. They tie a task's threads together. */
+  pullRequests: ReadonlyArray<string>;
+  status: StandupStatus;
+  note: string | undefined;
+  /** Formatted thread history, already trimmed to its share of the prompt. */
+  context: string;
+}
+
+export interface StandupSummaryGenerationInput {
+  cwd: string;
+  threads: ReadonlyArray<StandupSummaryThread>;
+  /** What model and provider to use for generation. */
+  modelSelection: ModelSelection;
+}
+
+export interface StandupSummaryGenerationResult {
+  summary: string;
+}
+
 /**
  * TextGeneration - Service tag for commit and change request text generation.
  */
@@ -106,6 +134,11 @@ export class TextGeneration extends Context.Service<
     readonly generateThreadTitle: (
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+    /** Summarize today's threads as a standup. */
+    readonly generateStandupSummary: (
+      input: StandupSummaryGenerationInput,
+    ) => Effect.Effect<StandupSummaryGenerationResult, TextGenerationError>;
   }
 >()("t3/textGeneration/TextGeneration") {}
 
@@ -113,7 +146,8 @@ type TextGenerationOp =
   | "generateCommitMessage"
   | "generatePrContent"
   | "generateBranchName"
-  | "generateThreadTitle";
+  | "generateThreadTitle"
+  | "generateStandupSummary";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -165,6 +199,10 @@ export const make = Effect.gen(function* () {
             return yield* textGeneration.generateThreadTitle({ ...input, linkedContext });
           }),
         ),
+      ),
+    generateStandupSummary: (input) =>
+      resolveInstance(registry, "generateStandupSummary", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generateStandupSummary(input)),
       ),
   });
 });
