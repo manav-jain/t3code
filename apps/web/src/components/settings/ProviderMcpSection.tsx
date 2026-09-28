@@ -1,12 +1,13 @@
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type {
   EnvironmentId,
+  ProjectId,
   ProviderInstanceId,
   ProviderMcpServer,
   ProviderMcpServerDefinition,
 } from "@t3tools/contracts";
 import { EllipsisIcon } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { writeTextToClipboard } from "../../hooks/useCopyToClipboard";
 import { ensureLocalApi } from "../../localApi";
@@ -46,6 +47,7 @@ import { Skeleton } from "../ui/skeleton";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import { SettingsSection } from "./settingsLayout";
 
 const STATUS_BADGE: Record<
   ProviderMcpServer["status"],
@@ -67,18 +69,37 @@ const failureMessage = (result: Parameters<typeof squashAtomCommandFailure>[0]) 
 };
 
 interface SignIn {
+  readonly key: string;
   readonly name: string;
+  readonly projectId: ProjectId | null;
   readonly url: string;
   readonly callbackUrl: string;
   readonly submitting: boolean;
   readonly error: string | null;
 }
 
+const serverKey = (server: Pick<ProviderMcpServer, "name" | "project">) =>
+  `${server.project?.id ?? ""}:${server.name}`;
+
+/** Where a server comes from: nothing for the instance's own, else claude.ai or its project. */
+const sourceLabel = (server: ProviderMcpServer) =>
+  server.project
+    ? `${server.project.title} · ${server.scope ?? "project"}`
+    : server.scope === null
+      ? ""
+      : (SCOPE_LABELS[server.scope] ?? server.scope);
+
+const matchesSearch = (server: ProviderMcpServer, query: string) =>
+  [server.name, server.target, sourceLabel(server)].some((field) =>
+    field.toLowerCase().includes(query),
+  );
+
 /**
  * The MCP servers a provider instance connects to on its own, from the user
- * config in that instance's home, with sign-in for remote servers. Sign-in
- * finishes on its own when the browser can reach the environment's localhost
- * callback; otherwise the user pastes the address of the page that failed.
+ * config in that instance's home and from projects on this environment, with
+ * sign-in for remote servers. Sign-in finishes on its own when the browser can
+ * reach the environment's localhost callback; otherwise the user pastes the
+ * address of the page that failed.
  */
 export function ProviderMcpSection({
   environmentId,
@@ -94,24 +115,30 @@ export function ProviderMcpSection({
   const startSignIn = useAtomCommand(providerMcpSignIn, { reportFailure: false });
   const finishSignIn = useAtomCommand(providerMcpFinishSignIn, { reportFailure: false });
   const [signIn, setSignIn] = useState<SignIn | null>(null);
-  const [busyName, setBusyName] = useState<string | null>(null);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<ProviderMcpServer | null>(null);
+  const [search, setSearch] = useState("");
 
   const servers = listQuery.data?.servers ?? null;
+  const query = search.trim().toLowerCase();
+  const visible = servers?.filter((server) => !query || matchesSearch(server, query)) ?? [];
 
   const runUpdate = async (
-    name: string,
+    server: ProviderMcpServer,
     type: "remove" | "sign-out",
     success: string,
   ): Promise<void> => {
-    setBusyName(name);
-    const result = await update({ environmentId, input: { type, instanceId, name } });
-    setBusyName(null);
+    setBusyKey(serverKey(server));
+    const result = await update({
+      environmentId,
+      input: { type, instanceId, name: server.name, projectId: server.project?.id ?? null },
+    });
+    setBusyKey(null);
     if (result._tag === "Failure") {
       toastManager.add({
         type: "error",
-        title: `Could not update ${name}`,
+        title: `Could not update ${server.name}`,
         description: failureMessage(result),
       });
       return;
@@ -121,64 +148,80 @@ export function ProviderMcpSection({
   };
 
   /** Resolves once the provider CLI finishes the sign-in, with or without a pasted address. */
-  const awaitSignIn = async (name: string, callbackUrl: string | null) => {
+  const awaitSignIn = async (target: SignIn, callbackUrl: string | null) => {
     const result = await finishSignIn({
       environmentId,
-      input: { instanceId, name, callbackUrl, cancel: false },
+      input: {
+        instanceId,
+        name: target.name,
+        projectId: target.projectId,
+        callbackUrl,
+        cancel: false,
+      },
     });
     setSignIn((current) => {
-      if (current?.name !== name) return current;
+      if (current?.key !== target.key) return current;
       return result._tag === "Success"
         ? null
         : { ...current, submitting: false, error: failureMessage(result) };
     });
     if (result._tag === "Success") {
-      toastManager.add({ type: "success", title: `Signed in to ${name}` });
+      toastManager.add({ type: "success", title: `Signed in to ${target.name}` });
       listQuery.refresh();
     }
   };
 
-  const beginSignIn = async (name: string) => {
+  const cancelSignIn = async () => {
+    if (!signIn) return;
+    const { name, projectId } = signIn;
+    setSignIn(null);
+    await finishSignIn({
+      environmentId,
+      input: { instanceId, name, projectId, callbackUrl: null, cancel: true },
+    });
+  };
+
+  const beginSignIn = async (server: ProviderMcpServer) => {
     if (signIn) await cancelSignIn();
-    setBusyName(name);
-    const result = await startSignIn({ environmentId, input: { instanceId, name } });
-    setBusyName(null);
+    const key = serverKey(server);
+    const projectId = server.project?.id ?? null;
+    setBusyKey(key);
+    const result = await startSignIn({
+      environmentId,
+      input: { instanceId, name: server.name, projectId },
+    });
+    setBusyKey(null);
     if (result._tag === "Failure") {
       toastManager.add({
         type: "error",
-        title: `Could not sign in to ${name}`,
+        title: `Could not sign in to ${server.name}`,
         description: failureMessage(result),
       });
       return;
     }
-    const url = result.value.authorizationUrl;
-    setSignIn({ name, url, callbackUrl: "", submitting: false, error: null });
+    const next: SignIn = {
+      key,
+      name: server.name,
+      projectId,
+      url: result.value.authorizationUrl,
+      callbackUrl: "",
+      submitting: false,
+      error: null,
+    };
+    setSignIn(next);
     void ensureLocalApi()
-      .shell.openExternal(url)
+      .shell.openExternal(next.url)
       .catch(() => {});
-    void awaitSignIn(name, null);
-  };
-
-  const cancelSignIn = async () => {
-    if (!signIn) return;
-    const { name } = signIn;
-    setSignIn(null);
-    await finishSignIn({
-      environmentId,
-      input: { instanceId, name, callbackUrl: null, cancel: true },
-    });
+    void awaitSignIn(next, null);
   };
 
   return (
-    <div className="flex flex-col gap-3 px-3 py-3 sm:px-4">
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-xs text-muted-foreground">
-          Servers this provider connects to on its own, from its user config. Project servers stay
-          in each project's config.
-        </p>
-        <div className="flex shrink-0 items-center gap-1">
+    <SettingsSection
+      title="MCP servers"
+      headerAction={
+        <div className="flex items-center gap-1">
           <Button
-            size="icon-sm"
+            size="icon-xs"
             variant="ghost"
             aria-label="Refresh MCP servers"
             aria-busy={listQuery.isPending}
@@ -187,44 +230,65 @@ export function ProviderMcpSection({
           >
             <RefreshIcon size="sm" refreshing={listQuery.isPending} />
           </Button>
-          <Button size="sm" variant="outline" disabled={readOnly} onClick={() => setAdding(true)}>
+          <Button size="xs" variant="outline" disabled={readOnly} onClick={() => setAdding(true)}>
             Add server
           </Button>
         </div>
-      </div>
-
+      }
+    >
       {servers === null ? (
-        listQuery.error ? (
-          <p className="text-sm text-muted-foreground">
-            Could not read MCP servers: {listQuery.error}
-          </p>
-        ) : (
-          <div className="flex flex-col gap-2" aria-label="Loading MCP servers">
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
-          </div>
-        )
+        <div className="px-3 py-3 sm:px-4">
+          {listQuery.error ? (
+            <p className="text-sm text-muted-foreground">
+              Could not read MCP servers: {listQuery.error}
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2" aria-label="Loading MCP servers">
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
+            </div>
+          )}
+        </div>
       ) : servers.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No MCP servers configured.</p>
+        <p className="px-3 py-3 text-sm text-muted-foreground sm:px-4">
+          No MCP servers configured.
+        </p>
       ) : (
-        <ul className="flex flex-col divide-y divide-border rounded-md border">
-          {servers.map((server) => {
+        <>
+          <div className="px-3 py-2 sm:px-4">
+            <Input
+              size="sm"
+              type="search"
+              aria-label="Search MCP servers"
+              placeholder="Search by name, URL, or project"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </div>
+          {visible.length === 0 ? (
+            <p className="px-3 py-3 text-sm text-muted-foreground sm:px-4">
+              No servers match “{search.trim()}”.
+            </p>
+          ) : null}
+          {visible.map((server) => {
+            const key = serverKey(server);
             const badge =
               server.status === "configured" && server.signedIn
                 ? { label: "Signed in", variant: "success" as const }
                 : STATUS_BADGE[server.status];
-            const scope =
-              server.scope === null ? null : (SCOPE_LABELS[server.scope] ?? server.scope);
-            const busy = busyName === server.name;
+            const source = sourceLabel(server);
+            const busy = busyKey === key;
             const hasMenuActions = server.canSignIn || server.signedIn || server.canRemove;
             return (
-              <li key={server.name} className="flex flex-col gap-2 px-3 py-2">
+              <div key={key} className="flex flex-col gap-2 px-3 py-2.5 sm:px-4">
                 <div className="flex min-w-0 items-center gap-2">
                   <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="flex min-w-0 items-center gap-1.5 text-sm">
+                    <span className="flex min-w-0 items-baseline gap-1.5 text-sm">
                       <span className="truncate">{server.name}</span>
-                      {scope ? (
-                        <span className="shrink-0 text-xs text-muted-foreground">{scope}</span>
+                      {source ? (
+                        <span className="shrink-0 truncate text-xs text-muted-foreground">
+                          {source}
+                        </span>
                       ) : null}
                     </span>
                     <span className="truncate text-xs text-muted-foreground">
@@ -239,7 +303,7 @@ export function ProviderMcpSection({
                       size="xs"
                       variant="outline"
                       disabled={readOnly || busy}
-                      onClick={() => void beginSignIn(server.name)}
+                      onClick={() => void beginSignIn(server)}
                     >
                       Sign in
                     </Button>
@@ -249,7 +313,7 @@ export function ProviderMcpSection({
                       <MenuTrigger
                         render={
                           <Button
-                            size="icon-sm"
+                            size="icon-xs"
                             variant="ghost"
                             aria-label={`Actions for ${server.name}`}
                             disabled={readOnly || busy}
@@ -260,18 +324,14 @@ export function ProviderMcpSection({
                       </MenuTrigger>
                       <MenuPopup align="end">
                         {server.canSignIn ? (
-                          <MenuItem onClick={() => void beginSignIn(server.name)}>
+                          <MenuItem onClick={() => void beginSignIn(server)}>
                             {server.status === "needs-auth" ? "Sign in" : "Sign in again"}
                           </MenuItem>
                         ) : null}
                         {server.signedIn ? (
                           <MenuItem
                             onClick={() =>
-                              void runUpdate(
-                                server.name,
-                                "sign-out",
-                                `Signed out of ${server.name}`,
-                              )
+                              void runUpdate(server, "sign-out", `Signed out of ${server.name}`)
                             }
                           >
                             Sign out
@@ -284,21 +344,22 @@ export function ProviderMcpSection({
                     </Menu>
                   ) : null}
                 </div>
-                {signIn?.name === server.name ? (
+                {signIn?.key === key ? (
                   <SignInPanel
                     signIn={signIn}
                     onChange={(callbackUrl) => setSignIn({ ...signIn, callbackUrl })}
                     onSubmit={() => {
-                      setSignIn({ ...signIn, submitting: true, error: null });
-                      void awaitSignIn(server.name, signIn.callbackUrl.trim());
+                      const submitted = { ...signIn, submitting: true, error: null };
+                      setSignIn(submitted);
+                      void awaitSignIn(submitted, signIn.callbackUrl.trim());
                     }}
                     onCancel={() => void cancelSignIn()}
                   />
                 ) : null}
-              </li>
+              </div>
             );
           })}
-        </ul>
+        </>
       )}
 
       <AddMcpServerDialog
@@ -321,8 +382,9 @@ export function ProviderMcpSection({
           <AlertDialogHeader>
             <AlertDialogTitle>Remove {removing?.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              The provider stops connecting to it. Its definition leaves the user config; add it
-              again to restore it.
+              {removing?.project
+                ? `Claude stops connecting to it in ${removing.project.title}. Add it again from that project to restore it.`
+                : "The provider stops connecting to it. Its definition leaves the user config; add it again to restore it."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -332,7 +394,7 @@ export function ProviderMcpSection({
               onClick={() => {
                 const target = removing;
                 setRemoving(null);
-                if (target) void runUpdate(target.name, "remove", `Removed ${target.name}`);
+                if (target) void runUpdate(target, "remove", `Removed ${target.name}`);
               }}
             >
               Remove
@@ -340,7 +402,7 @@ export function ProviderMcpSection({
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
-    </div>
+    </SettingsSection>
   );
 }
 
@@ -355,6 +417,7 @@ function SignInPanel({
   readonly onSubmit: () => void;
   readonly onCancel: () => void;
 }) {
+  const callbackId = useId();
   return (
     <div className="flex flex-col gap-2 rounded-md bg-muted/50 p-3 text-xs">
       <p>
@@ -391,12 +454,12 @@ function SignInPanel({
           onSubmit();
         }}
       >
-        <label htmlFor={`mcp-callback-${signIn.name}`} className="text-muted-foreground">
+        <label htmlFor={callbackId} className="text-muted-foreground">
           If the last page does not load, paste its full address here.
         </label>
         <div className="flex gap-2">
           <Input
-            id={`mcp-callback-${signIn.name}`}
+            id={callbackId}
             size="sm"
             type="url"
             autoComplete="off"

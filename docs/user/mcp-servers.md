@@ -2,12 +2,15 @@
 
 On web and desktop, open **Settings → Providers**, pick an environment, and select a Claude or
 Codex instance. **MCP servers** lists the servers that instance connects to on its own, from the
-user config in its home, with each one's status. Claude reports live health; Codex reports whether
-a server is configured, disabled, or signed in. Servers defined in a project's own config are not
-listed. Cursor, Grok, Antigravity, and OpenCode do not show this section.
+user config in its home, with each one's status. For Claude it also lists servers your projects on
+that environment add, labeled with the project: shared ones from the project's `.mcp.json`, and
+private "local" ones. Claude reports live health; Codex reports whether a server is configured,
+disabled, or signed in. Search filters by name, URL, or project. Cursor, Grok, Antigravity, and
+OpenCode do not show this section.
 
 - **Add server** saves a remote URL or a local command to the instance's user config, so every
-  session it runs can use it. Remove takes it out again.
+  session it runs can use it. Remove takes it out again. A project's local servers can be removed
+  too; its `.mcp.json` servers are shared through the repository, so change them there.
 - **Sign in** appears when a server needs it; **Sign in again** and **Sign out** are in the row's
   menu. Sign-in opens the server's page in your browser and finishes on its own once you approve
   access. When the environment runs on another machine, the last page can fail to load because it

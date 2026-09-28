@@ -4,7 +4,9 @@ import { query as claudeQuery, type SDKUserMessage } from "@anthropic-ai/claude-
 import {
   ClaudeSettings,
   CodexSettings,
+  type ProjectId,
   ProviderMcpError,
+  type ProviderMcpServer,
   type ProviderMcpFinishSignInInput,
   type ProviderMcpListInput,
   type ProviderMcpListResult,
@@ -19,6 +21,7 @@ import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -27,6 +30,7 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
+import * as ProjectionSnapshotQuery from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
@@ -35,6 +39,7 @@ import { deriveProviderInstanceConfigMap } from "../Layers/ProviderInstanceRegis
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { spawnAndCollect } from "../providerSnapshot.ts";
 import {
+  claudeLocalServerRoots,
   claudeMcpServers,
   codexMcpServers,
   findAuthorizationUrl,
@@ -100,6 +105,8 @@ export const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const path = yield* Path.Path;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const projections = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const context = yield* Effect.context<never>();
   const signIns = new Map<string, SignInSession>();
 
@@ -139,15 +146,20 @@ export const make = Effect.gen(function* () {
     } as McpTarget;
   });
 
-  const command = (target: McpTarget, args: ReadonlyArray<string>) =>
+  /** `cwd` is a project root for a project's servers; the CLI resolves them from there. */
+  const command = (target: McpTarget, args: ReadonlyArray<string>, cwd: string | undefined) =>
     resolveSpawnCommand(target.binaryPath, args, { env: target.env }).pipe(
       Effect.map((spawn) =>
-        ChildProcess.make(spawn.command, spawn.args, { env: target.env, shell: spawn.shell }),
+        ChildProcess.make(spawn.command, spawn.args, {
+          env: target.env,
+          shell: spawn.shell,
+          ...(cwd === undefined ? {} : { cwd }),
+        }),
       ),
     );
 
-  const runCli = (target: McpTarget, args: ReadonlyArray<string>) =>
-    command(target, args).pipe(
+  const runCli = (target: McpTarget, args: ReadonlyArray<string>, cwd?: string) =>
+    command(target, args, cwd).pipe(
       Effect.flatMap((cmd) => spawnAndCollect(target.binaryPath, cmd)),
       Effect.provide(context),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -171,8 +183,16 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  /** Claude reports live status only from a session, so start one that never prompts. */
-  const listClaude = (target: McpTarget) =>
+  /**
+   * Claude reports live status only from a session, so start one that never
+   * prompts. Inside a project it also loads the project's `.mcp.json` and local
+   * servers; only those are kept there, with claude.ai connectors off, since the
+   * user-level run already reports the rest.
+   */
+  const listClaude = (
+    target: McpTarget,
+    project: { readonly id: ProjectId; readonly title: string; readonly root: string } | null,
+  ) =>
     Effect.gen(function* () {
       const executablePath = yield* resolveClaudeSdkExecutablePath(target.binaryPath, target.env);
       const abort = new AbortController();
@@ -188,12 +208,13 @@ export const make = Effect.gen(function* () {
                 persistSession: false,
                 pathToClaudeCodeExecutable: executablePath,
                 abortController: abort,
-                settingSources: ["user"],
+                settingSources: project ? ["user", "project", "local"] : ["user"],
                 settings: { disableAllHooks: true },
                 allowedTools: [],
-                cwd: NodeOS.homedir(),
+                cwd: project?.root ?? NodeOS.homedir(),
                 env: {
                   ...target.env,
+                  ...(project ? { ENABLE_CLAUDEAI_MCP_SERVERS: "false" } : {}),
                   CLAUDE_CODE_AUTO_CONNECT_IDE: "0",
                   CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL: "1",
                 },
@@ -219,7 +240,12 @@ export const make = Effect.gen(function* () {
           yield* Effect.sleep(Duration.millis(500));
           statuses = yield* read;
         }
-        return claudeMcpServers(statuses);
+        return project
+          ? claudeMcpServers(
+              statuses.filter((entry) => entry.scope === "local" || entry.scope === "project"),
+              { id: project.id, title: project.title },
+            )
+          : claudeMcpServers(statuses);
       }).pipe(
         Effect.timeoutOrElse({
           duration: CLAUDE_STATUS_TIMEOUT,
@@ -230,15 +256,70 @@ export const make = Effect.gen(function* () {
       );
     }).pipe(Effect.provide(context));
 
+  /** Projects on this environment that add Claude servers of their own. */
+  const claudeServerProjects = Effect.fn("ProviderMcp.claudeServerProjects")(function* (
+    target: McpTarget,
+  ) {
+    const projects = yield* projections.getProjectShells().pipe(Effect.orElseSucceed(() => []));
+    const localRoots = yield* fileSystem
+      .readFileString(path.join(target.env.CLAUDE_CONFIG_DIR ?? NodeOS.homedir(), ".claude.json"))
+      .pipe(
+        Effect.flatMap((json) => Effect.try(() => claudeLocalServerRoots(json))),
+        Effect.orElseSucceed((): ReadonlySet<string> => new Set()),
+      );
+    const withServers = yield* Effect.forEach(projects, (project) =>
+      (localRoots.has(project.workspaceRoot)
+        ? Effect.succeed(true)
+        : fileSystem.exists(path.join(project.workspaceRoot, ".mcp.json"))
+      ).pipe(
+        Effect.orElseSucceed(() => false),
+        Effect.map((has) =>
+          has ? [{ id: project.id, title: project.title, root: project.workspaceRoot }] : [],
+        ),
+      ),
+    );
+    return withServers.flat();
+  });
+
   const list: ProviderMcp["Service"]["list"] = Effect.fn("ProviderMcp.list")(function* (input) {
     const target = yield* resolveTarget(input.instanceId);
-    if (target.driver === "claudeAgent") return { servers: yield* listClaude(target) };
+    if (target.driver === "claudeAgent") {
+      const projects = yield* claudeServerProjects(target);
+      const [own, perProject] = yield* Effect.all(
+        [
+          listClaude(target, null),
+          // A project whose servers cannot be read is left out rather than failing the list.
+          Effect.forEach(
+            projects,
+            (project) =>
+              listClaude(target, project).pipe(
+                Effect.orElseSucceed((): ReadonlyArray<ProviderMcpServer> => []),
+              ),
+            { concurrency: 3 },
+          ),
+        ],
+        { concurrency: 2 },
+      );
+      return { servers: [...own, ...perProject.flat()] };
+    }
     const stdout = yield* runCli(target, ["mcp", "list", "--json"]);
     return yield* Effect.try({
       try: () => ({ servers: codexMcpServers(stdout) }),
       catch: failure("Codex listed its MCP servers in a shape T3 Code does not understand."),
     });
   });
+
+  const projectRoot = (projectId: ProjectId | null) =>
+    projectId === null
+      ? Effect.succeed(undefined)
+      : projections.getProjectShellById(projectId).pipe(
+          Effect.mapError(failure("Could not read the project.")),
+          Effect.flatMap((project) =>
+            Option.isSome(project)
+              ? Effect.succeed(project.value.workspaceRoot)
+              : Effect.fail(failure("This project no longer exists.")()),
+          ),
+        );
 
   /** Names from a listing reach the CLI as arguments; never let one read as an option. */
   const guardName = (name: string) =>
@@ -248,18 +329,22 @@ export const make = Effect.gen(function* () {
     function* (input) {
       yield* guardName(input.name);
       const target = yield* resolveTarget(input.instanceId);
+      if (input.type === "add") {
+        return yield* runCli(target, mcpCliArgs.add(target.driver, input.name, input.server)).pipe(
+          Effect.asVoid,
+        );
+      }
+      const cwd = yield* projectRoot(input.projectId);
       const args =
-        input.type === "add"
-          ? mcpCliArgs.add(target.driver, input.name, input.server)
-          : input.type === "remove"
-            ? mcpCliArgs.remove(target.driver, input.name)
-            : mcpCliArgs.signOut(target.driver, input.name);
-      yield* runCli(target, args);
+        input.type === "remove"
+          ? mcpCliArgs.remove(target.driver, input.name, cwd === undefined ? "user" : "local")
+          : mcpCliArgs.signOut(target.driver, input.name);
+      yield* runCli(target, args, cwd);
     },
   );
 
-  const signInKey = (input: { instanceId: string; name: string }) =>
-    `${input.instanceId}\u0000${input.name}`;
+  const signInKey = (input: { instanceId: string; name: string; projectId: string | null }) =>
+    `${input.instanceId}\u0000${input.projectId ?? ""}\u0000${input.name}`;
 
   const endSignIn = (key: string, session: SignInSession) =>
     Effect.suspend(() => {
@@ -271,6 +356,7 @@ export const make = Effect.gen(function* () {
     function* (input) {
       yield* guardName(input.name);
       const target = yield* resolveTarget(input.instanceId);
+      const cwd = yield* projectRoot(input.projectId);
       const key = signInKey(input);
       const previous = signIns.get(key);
       if (previous) yield* endSignIn(key, previous);
@@ -280,7 +366,7 @@ export const make = Effect.gen(function* () {
       const exit = yield* Deferred.make<number>();
       let output = "";
       const started = yield* Effect.gen(function* () {
-        const cmd = yield* command(target, mcpCliArgs.signIn(target.driver, input.name));
+        const cmd = yield* command(target, mcpCliArgs.signIn(target.driver, input.name), cwd);
         const child = yield* spawner.spawn(cmd);
         yield* Stream.merge(child.stdout, child.stderr).pipe(
           Stream.decodeText(),

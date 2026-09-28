@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  claudeLocalServerRoots,
   claudeMcpServers,
   codexMcpServers,
   findAuthorizationUrl,
@@ -37,6 +38,7 @@ describe("claudeMcpServers", () => {
       {
         name: "sentry",
         scope: "user",
+        project: null,
         transport: "http",
         target: "https://mcp.sentry.dev/mcp",
         status: "needs-auth",
@@ -48,6 +50,7 @@ describe("claudeMcpServers", () => {
       {
         name: "claude.ai Slack",
         scope: "claudeai",
+        project: null,
         transport: "connector",
         target: "https://mcp.slack.com/mcp",
         status: "connected",
@@ -59,6 +62,7 @@ describe("claudeMcpServers", () => {
       {
         name: "docs",
         scope: "project",
+        project: null,
         transport: "stdio",
         target: "npx docs-mcp",
         status: "failed",
@@ -197,5 +201,49 @@ describe("findAuthorizationUrl", () => {
       findAuthorizationUrl("Visit https://claude.ai/connect/slack\nPaste the redirect URL:"),
     ).toBe("https://claude.ai/connect/slack");
     expect(findAuthorizationUrl("Authenticating with https://mcp.linear.app/mcp …")).toBeNull();
+  });
+});
+
+describe("project servers", () => {
+  it("tags a project's servers and lets only its private local ones be removed", () => {
+    const project = { id: "project-web" as never, title: "web" };
+    const servers = claudeMcpServers(
+      [
+        {
+          name: "vitals",
+          status: "connected",
+          scope: "local",
+          config: { type: "http", url: "https://v" },
+        },
+        { name: "shared", status: "failed", scope: "project", config: { command: "npx" } },
+      ],
+      project,
+    );
+    expect(servers.map(({ name, project, canRemove }) => ({ name, project, canRemove }))).toEqual([
+      { name: "vitals", project, canRemove: true },
+      { name: "shared", project, canRemove: false },
+    ]);
+    expect(mcpCliArgs.remove("claudeAgent", "vitals", "local")).toEqual([
+      "mcp",
+      "remove",
+      "vitals",
+      "--scope",
+      "local",
+    ]);
+  });
+
+  it("finds project roots with local servers in Claude's global config", () => {
+    const roots = claudeLocalServerRoots(
+      JSON.stringify({
+        mcpServers: { user: {} },
+        projects: {
+          "/repo/web": { mcpServers: { vitals: { type: "http", url: "https://v" } } },
+          "/repo/empty": { mcpServers: {} },
+          "/repo/none": { allowedTools: [] },
+        },
+      }),
+    );
+    expect([...roots]).toEqual(["/repo/web"]);
+    expect(claudeLocalServerRoots("{}").size).toBe(0);
   });
 });

@@ -1,14 +1,16 @@
 /**
- * MCP servers a provider instance connects to on its own, as configured in
- * that instance's home (user scope). The environment runs the provider's CLI
- * with the instance's environment, so config and tokens stay where the provider
- * keeps them. T3 Code's own per-session `t3-code` server never appears here.
+ * MCP servers a provider instance connects to on its own: those in the user
+ * config of the instance's home, plus ones a project on this environment adds.
+ * The environment runs the provider's CLI with the instance's environment (and
+ * inside the project, for a project's servers), so config and tokens stay where
+ * the provider keeps them. T3 Code's own per-session `t3-code` server never
+ * appears here.
  *
  * @module providerMcp
  */
 import * as Schema from "effect/Schema";
 
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
 /**
@@ -27,8 +29,10 @@ export type ProviderMcpServerStatus = typeof ProviderMcpServerStatus.Type;
 
 export const ProviderMcpServer = Schema.Struct({
   name: TrimmedNonEmptyString,
-  /** Where the definition lives, for example "user" or "claudeai". */
+  /** Where the definition lives, for example "user", "claudeai", "local", or "project". */
   scope: Schema.NullOr(Schema.String),
+  /** The project that adds this server; null for the instance's own servers. */
+  project: Schema.NullOr(Schema.Struct({ id: ProjectId, title: Schema.String })),
   transport: Schema.Literals(["stdio", "http", "sse", "connector", "other"]),
   /** Command line or URL. */
   target: Schema.String,
@@ -81,6 +85,7 @@ export const ProviderMcpUpdateInput = Schema.Union([
     type: Schema.Literals(["remove", "sign-out"]),
     instanceId: ProviderInstanceId,
     name: TrimmedNonEmptyString,
+    projectId: Schema.NullOr(ProjectId),
   }),
 ]);
 export type ProviderMcpUpdateInput = typeof ProviderMcpUpdateInput.Type;
@@ -88,6 +93,7 @@ export type ProviderMcpUpdateInput = typeof ProviderMcpUpdateInput.Type;
 export const ProviderMcpSignInInput = Schema.Struct({
   instanceId: ProviderInstanceId,
   name: TrimmedNonEmptyString,
+  projectId: Schema.NullOr(ProjectId),
 });
 export type ProviderMcpSignInInput = typeof ProviderMcpSignInInput.Type;
 
@@ -105,6 +111,7 @@ export type ProviderMcpSignInStarted = typeof ProviderMcpSignInStarted.Type;
 export const ProviderMcpFinishSignInInput = Schema.Struct({
   instanceId: ProviderInstanceId,
   name: TrimmedNonEmptyString,
+  projectId: Schema.NullOr(ProjectId),
   callbackUrl: Schema.NullOr(TrimmedNonEmptyString),
   cancel: Schema.Boolean,
 });

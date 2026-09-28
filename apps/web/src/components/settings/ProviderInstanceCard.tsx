@@ -387,7 +387,7 @@ interface ProviderInstanceCardProps {
    */
   readonly headerAction?: ReactNode | undefined;
   readonly setup?: ReactNode;
-  /** The instance's MCP servers, when its environment and driver can manage them. */
+  /** The instance's MCP servers section, when its environment and driver can manage them. */
   readonly mcp?: ReactNode;
   readonly hiddenModels: ReadonlyArray<string>;
   readonly favoriteModels: ReadonlyArray<string>;
@@ -979,7 +979,7 @@ export function ProviderInstanceCard({
         </SettingsSection>
       ) : null}
 
-      {mcp ? <SettingsSection title="MCP servers">{mcp}</SettingsSection> : null}
+      {mcp}
     </>
   );
 }

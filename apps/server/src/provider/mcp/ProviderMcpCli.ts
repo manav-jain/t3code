@@ -42,11 +42,14 @@ const commandLine = (command: string | undefined, args: ReadonlyArray<string> | 
   [command, ...(args ?? [])].filter(Boolean).join(" ");
 
 /**
- * Claude reports servers from every source; only user-scope ones are the
- * instance's own to remove, since project and local scopes belong to a checkout
- * and claude.ai connectors to the account.
+ * Claude reports servers from every source. User-scope servers and a project's
+ * private local ones can be removed here; a project's `.mcp.json` servers are
+ * shared through the repository and claude.ai connectors belong to the account.
  */
-export function claudeMcpServers(statuses: ReadonlyArray<ClaudeMcpStatus>): ProviderMcpServer[] {
+export function claudeMcpServers(
+  statuses: ReadonlyArray<ClaudeMcpStatus>,
+  project: ProviderMcpServer["project"] = null,
+): ProviderMcpServer[] {
   return statuses
     .filter((entry) => entry.name !== T3_CODE_SERVER && entry.source !== "sdk")
     .map((entry) => {
@@ -65,13 +68,14 @@ export function claudeMcpServers(statuses: ReadonlyArray<ClaudeMcpStatus>): Prov
       return {
         name: entry.name,
         scope,
+        project,
         transport,
         target: entry.config?.url ?? commandLine(entry.config?.command, entry.config?.args),
         status,
         detail: entry.error?.trim() || null,
         canSignIn: remote,
         signedIn: remote && status === "connected",
-        canRemove: scope === "user",
+        canRemove: scope === "user" || scope === "local",
       };
     });
 }
@@ -107,6 +111,7 @@ export function codexMcpServers(json: string): ProviderMcpServer[] {
       {
         name,
         scope: "user",
+        project: null,
         transport,
         target:
           typeof transportRaw.url === "string"
@@ -149,8 +154,11 @@ export const mcpCliArgs = {
         ]
       : ["mcp", "add", name, "--url", server.url];
   },
-  remove: (driver: McpDriver, name: string) =>
-    driver === "claudeAgent" ? ["mcp", "remove", name, "--scope", "user"] : ["mcp", "remove", name],
+  /** A project's local Claude servers are removed from inside that project. */
+  remove: (driver: McpDriver, name: string, scope: string | null) =>
+    driver === "claudeAgent"
+      ? ["mcp", "remove", name, "--scope", scope === "local" ? "local" : "user"]
+      : ["mcp", "remove", name],
   signOut: (_driver: McpDriver, name: string) => ["mcp", "logout", name],
   /** Both CLIs print the URL and accept the pasted redirect URL on stdin. */
   signIn: (_driver: McpDriver, name: string) => ["mcp", "login", name, "--no-browser"],
@@ -177,4 +185,25 @@ export function outputTail(output: string, lines = 4): string {
     .filter(Boolean)
     .slice(-lines)
     .join(" · ");
+}
+
+/**
+ * Project roots with private (local-scope) Claude servers, from Claude's global
+ * `.claude.json`: `projects[<absolute root>].mcpServers`.
+ */
+export function claudeLocalServerRoots(json: string): ReadonlySet<string> {
+  const parsed: unknown = JSON.parse(json);
+  const projects =
+    typeof parsed === "object" && parsed !== null
+      ? (parsed as { projects?: unknown }).projects
+      : undefined;
+  if (typeof projects !== "object" || projects === null) return new Set();
+  return new Set(
+    Object.entries(projects).flatMap(([root, value]) => {
+      const servers = (value as { mcpServers?: unknown } | null)?.mcpServers;
+      return typeof servers === "object" && servers !== null && Object.keys(servers).length > 0
+        ? [root]
+        : [];
+    }),
+  );
 }
