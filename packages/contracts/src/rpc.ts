@@ -108,6 +108,15 @@ import {
 } from "./provider.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
+  ProviderMcpError,
+  ProviderMcpFinishSignInInput,
+  ProviderMcpListInput,
+  ProviderMcpListResult,
+  ProviderMcpSignInInput,
+  ProviderMcpSignInStarted,
+  ProviderMcpUpdateInput,
+} from "./providerMcp.ts";
+import {
   PullRequestActionInput,
   PullRequestActivity,
   PullRequestCommentInput,
@@ -304,6 +313,10 @@ export const WS_METHODS = {
   providerAuthRespond: "provider.auth.respond",
   providerAuthCancel: "provider.auth.cancel",
   providerAuthLogout: "provider.auth.logout",
+  providerMcpList: "provider.mcp.list",
+  providerMcpUpdate: "provider.mcp.update",
+  providerMcpSignIn: "provider.mcp.signIn",
+  providerMcpFinishSignIn: "provider.mcp.finishSignIn",
   providerAuthSubscribe: "provider.auth.subscribe",
   providerInstallStart: "provider.install.start",
   providerInstallCancel: "provider.install.cancel",
@@ -529,6 +542,30 @@ const WsProviderAuthLogoutRpc = Rpc.make(WS_METHODS.providerAuthLogout, {
   payload: ProviderSetupInput,
   success: ProviderAuthState,
   error: ProviderSetupRpcError,
+});
+
+const ProviderMcpRpcError = Schema.Union([ProviderMcpError, EnvironmentAuthorizationError]);
+
+const WsProviderMcpListRpc = Rpc.make(WS_METHODS.providerMcpList, {
+  payload: ProviderMcpListInput,
+  success: ProviderMcpListResult,
+  error: ProviderMcpRpcError,
+});
+
+const WsProviderMcpUpdateRpc = Rpc.make(WS_METHODS.providerMcpUpdate, {
+  payload: ProviderMcpUpdateInput,
+  error: ProviderMcpRpcError,
+});
+
+const WsProviderMcpSignInRpc = Rpc.make(WS_METHODS.providerMcpSignIn, {
+  payload: ProviderMcpSignInInput,
+  success: ProviderMcpSignInStarted,
+  error: ProviderMcpRpcError,
+});
+
+const WsProviderMcpFinishSignInRpc = Rpc.make(WS_METHODS.providerMcpFinishSignIn, {
+  payload: ProviderMcpFinishSignInInput,
+  error: ProviderMcpRpcError,
 });
 
 const WsProviderAuthSubscribeRpc = Rpc.make(WS_METHODS.providerAuthSubscribe, {
@@ -1402,6 +1439,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsProviderAuthRespondRpc,
   WsProviderAuthCancelRpc,
   WsProviderAuthLogoutRpc,
+  WsProviderMcpListRpc,
+  WsProviderMcpUpdateRpc,
+  WsProviderMcpSignInRpc,
+  WsProviderMcpFinishSignInRpc,
   WsProviderAuthSubscribeRpc,
   WsProviderInstallStartRpc,
   WsProviderInstallCancelRpc,

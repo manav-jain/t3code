@@ -117,6 +117,7 @@ import {
 } from "./ws.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as GitManager from "./git/GitManager.ts";
+import * as ProviderMcp from "./provider/mcp/ProviderMcp.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -820,6 +821,7 @@ const buildAppUnderTest = (options?: {
           Layer.mock(ProviderAuthService)({
             ...options?.layers?.providerAuth,
           }),
+          Layer.mock(ProviderMcp.ProviderMcp)({}),
           Layer.mock(ProviderInstanceRegistry)({
             getInstance: () => Effect.succeed(undefined),
             listInstances: Effect.succeed([]),

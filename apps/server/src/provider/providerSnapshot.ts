@@ -67,6 +67,7 @@ export interface ServerProviderPresentation {
   readonly reportsContextWindow?: boolean;
   readonly requiresNewThreadForModelChange?: boolean;
   readonly supportsConversationRollback?: boolean;
+  readonly supportsMcpManagement?: boolean;
 }
 
 export type ServerProviderDraft = Omit<ServerProvider, "instanceId" | "driver">;
@@ -219,6 +220,7 @@ export function buildServerProvider(input: {
     ...(typeof input.presentation.supportsConversationRollback === "boolean"
       ? { supportsConversationRollback: input.presentation.supportsConversationRollback }
       : {}),
+    ...(input.presentation.supportsMcpManagement === true ? { supportsMcpManagement: true } : {}),
     ...(input.presentation.badgeLabel ? { badgeLabel: input.presentation.badgeLabel } : {}),
     ...(typeof input.presentation.showInteractionModeToggle === "boolean"
       ? { showInteractionModeToggle: input.presentation.showInteractionModeToggle }
