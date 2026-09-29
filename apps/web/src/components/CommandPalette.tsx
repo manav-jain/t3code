@@ -42,6 +42,7 @@ import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
+  CalendarCheckIcon,
   ChartNoAxesColumnIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
@@ -2016,6 +2017,17 @@ function OpenCommandPaletteDialog(props: {
       },
     });
   }
+
+  actionItems.push({
+    kind: "action",
+    value: "action:standup",
+    searchTerms: ["standup", "today", "summary", "daily", "started", "closed", "halted"],
+    title: "Open standup",
+    icon: <CalendarCheckIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/standup" });
+    },
+  });
 
   actionItems.push({
     kind: "action",

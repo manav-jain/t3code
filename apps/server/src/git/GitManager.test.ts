@@ -310,6 +310,7 @@ function createTextGeneration(
       Effect.succeed({
         title: "Update workflow",
       }),
+    generateStandupSummary: () => Effect.succeed({ summary: "" }),
     ...overrides,
   };
 
@@ -358,6 +359,7 @@ function createTextGeneration(
             }),
         ),
       ),
+    generateStandupSummary: (input) => implementation.generateStandupSummary(input),
   };
 }
 
