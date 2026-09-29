@@ -26,6 +26,8 @@ export const StandupDayThread = Schema.Struct({
   threadId: ThreadId,
   title: TrimmedNonEmptyString,
   projectTitle: Schema.NullOr(Schema.String),
+  /** The sidebar group the user filed the thread under, where thread groups exist. */
+  groupName: Schema.NullOr(Schema.String),
   status: StandupStatus,
   /** Signals behind the status, for example "new · waiting for approval". */
   note: Schema.NullOr(Schema.String),

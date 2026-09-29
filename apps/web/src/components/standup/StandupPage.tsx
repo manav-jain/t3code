@@ -258,7 +258,9 @@ function StandupEnvironmentDay({
                       >
                         <span className="truncate">{thread.title}</span>
                         <span className="shrink-0 truncate text-xs text-muted-foreground">
-                          {[thread.projectTitle, thread.note].filter(Boolean).join(" · ")}
+                          {[thread.projectTitle, thread.groupName, thread.note]
+                            .filter(Boolean)
+                            .join(" · ")}
                         </span>
                       </Link>
                     </li>

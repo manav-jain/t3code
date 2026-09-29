@@ -165,6 +165,14 @@ export const selectStandupDay = Effect.fn("selectStandupDay")(
       FROM projection_thread_pull_requests
       WHERE source != 'stack-dismissed'
     `;
+    // Thread groups are the user's own filing and a strong hint for which threads form one
+    // task. The column exists only where thread groups are installed; without it, no groups.
+    const groupRows = yield* sql<{ threadId: string; groupName: string }>`
+      SELECT thread_id AS "threadId", group_name AS "groupName"
+      FROM projection_threads
+      WHERE group_name IS NOT NULL
+    `.pipe(Effect.orElseSucceed(() => []));
+    const groupByThread = new Map(groupRows.map((row) => [row.threadId, row.groupName]));
     const pullRequestsByThread = new Map<string, StandupPullRequest[]>();
     for (const row of pullRequestRows) {
       const snapshot = parseSnapshot(row.snapshotJson);
@@ -188,6 +196,7 @@ export const selectStandupDay = Effect.fn("selectStandupDay")(
         threadId: ThreadId.make(row.threadId),
         title: row.title,
         projectTitle: row.projectTitle,
+        groupName: groupByThread.get(row.threadId) ?? null,
         branch: row.branch,
         pullRequests,
         ...classified,
@@ -201,10 +210,11 @@ export const selectStandupDay = Effect.fn("selectStandupDay")(
 export const getStandupDay = (input: StandupDayInput, now: string) =>
   selectStandupDay(input, now).pipe(
     Effect.map((entries): StandupDay => {
-      const threads = entries.map(({ threadId, title, projectTitle, status, note }) => ({
+      const threads = entries.map(({ threadId, title, projectTitle, groupName, status, note }) => ({
         threadId,
         title,
         projectTitle,
+        groupName,
         status,
         note,
       }));

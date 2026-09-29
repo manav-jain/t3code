@@ -83,6 +83,8 @@ export interface ThreadTitleGenerationResult {
 export interface StandupSummaryThread {
   title: string;
   projectTitle: string | undefined;
+  /** The sidebar group the user filed the thread under. */
+  group: string | null;
   branch: string | null;
   /** Linked pull requests, formatted for the prompt. They tie a task's threads together. */
   pullRequests: ReadonlyArray<string>;

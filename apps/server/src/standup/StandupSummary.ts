@@ -42,6 +42,7 @@ export const generateStandupSummary = Effect.fn("generateStandupSummary")(functi
         Effect.map((messages) => ({
           title: entry.title,
           projectTitle: entry.projectTitle ?? undefined,
+          group: entry.groupName,
           branch: entry.branch,
           pullRequests: entry.pullRequests.map(
             (pullRequest) =>

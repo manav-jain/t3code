@@ -125,12 +125,17 @@ it.effect("reads a past day's threads and history from the projections", () => {
     yield* message("m4", "assistant", "The callback drops the return path.", noonYesterday);
     yield* message("m5", "user", "Something for today.", nowToday);
 
+    // Thread groups add this column where they are installed; the day reads it when present.
+    yield* sql`ALTER TABLE projection_threads ADD COLUMN group_name TEXT`;
+    yield* sql`UPDATE projection_threads SET group_name = 'Sign-in' WHERE thread_id = 'thread-login'`;
+
     const day = yield* getStandupDay(yesterday, nowToday);
     assert.deepStrictEqual(day.threads, [
       {
         threadId: ThreadId.make("thread-login"),
         title: "Fix login redirect",
         projectTitle: "Web",
+        groupName: "Sign-in",
         status: "in-progress",
         note: "stopped before finishing",
       },
@@ -142,6 +147,7 @@ it.effect("reads a past day's threads and history from the projections", () => {
     assert.strictEqual(requests[0]!.threads.length, 1);
     const [thread] = requests[0]!.threads;
     assert.strictEqual(thread!.branch, "fix/login");
+    assert.strictEqual(thread!.group, "Sign-in");
     // The opening request orients the model; the rest is only what happened that day.
     assert.include(thread!.context, "Login loops after SSO.");
     assert.include(thread!.context, "The callback drops the return path.");

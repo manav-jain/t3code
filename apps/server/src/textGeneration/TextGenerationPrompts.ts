@@ -355,6 +355,7 @@ export function buildStandupSummaryPrompt(input: StandupSummaryPromptInput) {
     [
       `### ${thread.title}`,
       ...(thread.projectTitle ? [`Project: ${thread.projectTitle}`] : []),
+      ...(thread.group ? [`Group: ${thread.group}`] : []),
       ...(thread.branch ? [`Branch: ${thread.branch}`] : []),
       ...(thread.pullRequests.length > 0
         ? [`Pull requests: ${thread.pullRequests.join("; ")}`]
@@ -369,10 +370,12 @@ Return a JSON object with key summary: GitHub-flavored markdown.
 
 Before writing, silently group the threads into tasks the way a teammate would hear them at standup: by the feature, product flow, or goal they serve, not by chat. Threads on different branches and pull requests belong together when they work on the same flow, product area, or initiative, such as several fixes to one checkout flow, a feature plus its docs, or several improvements to the same internal tool. Keep genuinely unrelated work apart, even inside one project. Expect noticeably fewer tasks than threads. Each thread belongs to exactly one task.
 
+A thread's Group is how the user filed it in the sidebar. When the group names a workstream, such as a product area or initiative, its threads usually belong together: fold them into one task, or a few tasks that each start with the group name, unless their contents are clearly unrelated. A group that reads as a catch-all, such as "Misc", "Ad hocs", or "Backlog", says nothing about the task; judge those threads by their contents.
+
 Rules:
 - Use the headings "## Done", "## In progress", and "## Blocked", in that order. Skip a heading with no tasks.
 - Decide each task's status yourself from its threads' statuses and contents: Done when its work finished or shipped; Blocked when it cannot move until the user or something outside the agent acts, such as an approval, an answer, or a failure to fix; In progress otherwise. A task with one done thread and another still moving is In progress.
-- One bullet per task: the task name in bold, one sentence on where it stands overall, then the titles of the threads it drew on in italics, like _(Fix login redirect; SSO callback tests)_. Under it, at most three one-sentence sub-bullets for what matters most: what shipped, a decision, or what is left.
+- One bullet per task: the task name in bold, led by its group when the task comes from a workstream group, like **In-app purchase: refund flow**, one sentence on where it stands overall, then the titles of the threads it drew on in italics, like _(Fix login redirect; SSO callback tests)_. Under it, at most three one-sentence sub-bullets for what matters most: what shipped, a decision, or what is left.
 - For blocked tasks, say what stopped them and what would unblock them.
 - State only what the thread contents support. Say it is unclear rather than guess, and never claim work shipped unless a thread shows it.
 - Do not invent links, ids, or numbers. Never include email addresses, phone numbers, or other personal data from the threads.
