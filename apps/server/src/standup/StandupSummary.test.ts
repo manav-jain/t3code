@@ -126,7 +126,8 @@ it.effect("reads a past day's threads and history from the projections", () => {
     yield* message("m5", "user", "Something for today.", nowToday);
 
     // Thread groups add this column where they are installed; the day reads it when present.
-    yield* sql`ALTER TABLE projection_threads ADD COLUMN group_name TEXT`;
+    // Add it here where they are not, and keep the existing one where they are.
+    yield* sql`ALTER TABLE projection_threads ADD COLUMN group_name TEXT`.pipe(Effect.ignore);
     yield* sql`UPDATE projection_threads SET group_name = 'Sign-in' WHERE thread_id = 'thread-login'`;
 
     const day = yield* getStandupDay(yesterday, nowToday);
